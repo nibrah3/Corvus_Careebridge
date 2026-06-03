@@ -13,10 +13,15 @@ Session types and their context files:
 
 Token saving: ~70% reduction on baseline context for automated sessions.
 """
+import io
 import json
 import os
 import sys
 from pathlib import Path
+
+# Force UTF-8 stdout so context files with arrows/unicode don't crash on cp1252 Windows
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 CB_DIR = Path(os.environ.get("CB_DIR",
     Path(__file__).resolve().parent.parent))

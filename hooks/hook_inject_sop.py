@@ -8,9 +8,13 @@ block into Claude's context.
 Claude does not "optionally read a document" — it receives the SOP as a
 system-level instruction it must follow for this session.
 """
+import io
 import json
 import os
 import sys
+
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 CB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOP_DIR = os.path.join(CB_DIR, "sops")

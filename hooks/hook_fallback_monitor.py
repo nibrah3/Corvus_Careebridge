@@ -10,10 +10,15 @@ work (not debugging), activates fallback mode:
 This enforces the rule from sop_fallback_rules.md without relying on Claude
 remembering to apply it.
 """
+import io
 import json
 import os
 import sys
 import time
+
+# Force UTF-8 stdout — emoji in warning messages would crash on Windows cp1252
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 CB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, CB_DIR)
