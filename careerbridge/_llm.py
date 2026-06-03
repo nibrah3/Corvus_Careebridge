@@ -1,4 +1,17 @@
-"""LLM interface for the assessment pipeline.
+"""
+FUTURE MIGRATION NOTE — _llm.py
+
+This module calls Claude Sonnet 4.6 directly via the Anthropic SDK.
+It is used by assessment_pipeline.py for per-page MCQ/radio reasoning.
+
+The long-term direction is for Claude Code (the CLI) to drive assessments
+directly via skills and MCP tools, eliminating this Python-level API call.
+Until assessment_pipeline.py is superseded by skill_assess_text.md in
+production, this module should remain unchanged.
+
+Do not add new LLM calls here. New reasoning goes in skill prompt files.
+------------------------------------------------------------------------
+LLM interface for the assessment pipeline.
 
 Uses Anthropic SDK directly — no OpenRouter routing.
 API key priority:
@@ -42,7 +55,7 @@ def _make_client():
         return ("openrouter", OpenAI(api_key=_OPENROUTER_KEY,
                                      base_url="https://openrouter.ai/api/v1"))
     raise RuntimeError(
-        "No LLM API key found. Set ANTHROPIC_API_KEY in D:\\cb-core\\.env"
+        "No LLM API key found. Set ANTHROPIC_API_KEY in E:\\Corvus_Careebridge\\.env"
     )
 
 

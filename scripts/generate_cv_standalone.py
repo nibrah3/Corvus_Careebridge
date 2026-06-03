@@ -1,18 +1,26 @@
 """
-generate_cv_standalone.py — Menu-triggered CV / cover letter generator.
+generate_cv_standalone.py — Data-dumper for the CV generation skill.
+
+Two modes:
+
+  --mode dump   (default)
+      Fetch job markdown via VPS Firecrawl + profile from VPS postgres.
+      Print both as JSON to stdout. Claude Code reads this output,
+      reasons in context, writes the CV sections, then calls --mode save.
+
+  --mode save
+      Receive pre-written CV sections JSON from Claude Code (via --sections-json).
+      Call cv_generator.generate_cv() to format and save TXT + PDF.
+      Print file paths as JSON.
 
 Usage:
-  python generate_cv_standalone.py --profile <profile_id> --job-url <url>
-  python generate_cv_standalone.py --profile <profile_id> --job-url <url> --cover-letter
-
-Fetches the profile from vps_mcp (localhost:8713), scrapes the job page,
-then calls cv_generator to produce a tailored CV (and optionally a cover letter).
-Prints a JSON result dict for Claude to read.
+    python generate_cv_standalone.py --profile <id> --job-url <url>
+    python generate_cv_standalone.py --profile <id> --job-url <url> --mode save --sections-json '<json>'
+    python generate_cv_standalone.py --profile <id> --job-url <url> --cover-letter
 """
 import argparse
 import json
 import sys
-import re
 import urllib.request
 from pathlib import Path
 
@@ -22,18 +30,16 @@ VPS_URL = "http://localhost:8713/mcp"
 
 sys.path.insert(0, str(CB_DIR))
 
-
-# ── VPS profile fetch ──────────────────────────────────────────────────────────
-
 _seq = 0
+
 
 def _mcp_call(tool: str, **kwargs) -> dict:
     global _seq
     _seq += 1
     body = json.dumps({
         "jsonrpc": "2.0", "id": _seq,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": kwargs},
+        "method":  "tools/call",
+        "params":  {"name": tool, "arguments": kwargs},
     }).encode()
     req = urllib.request.Request(
         VPS_URL, data=body, headers={"Content-Type": "application/json"}
@@ -47,115 +53,85 @@ def _mcp_call(tool: str, **kwargs) -> dict:
         return {"error": str(e)}
 
 
-# ── Job page scraper ───────────────────────────────────────────────────────────
-
-def _scrape_job(url: str) -> dict:
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            html = r.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        return {"error": f"Could not fetch job page: {e}"}
-
-    # Extract title
-    title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.I)
-    title = title_match.group(1).strip() if title_match else "Job Opportunity"
-    title = re.sub(r"\s*[|\-–]\s*.+$", "", title).strip()  # strip site name suffix
-
-    # Extract company from og:site_name or title suffix
-    company_match = re.search(
-        r'(?:og:site_name|name=["\']company["\'])[^>]+content=["\']([^"\']+)["\']',
-        html, re.I
-    )
-    company = company_match.group(1).strip() if company_match else "the company"
-
-    # Strip HTML → plain text for description
-    text = re.sub(r"<script[^>]*>[\s\S]*?</script>", " ", html, flags=re.I)
-    text = re.sub(r"<style[^>]*>[\s\S]*?</style>", " ", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"&[a-z]+;", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # Keep a generous chunk — cv_generator does its own keyword extraction
-    description = text[:8000]
-
-    job_id = re.sub(r"[^a-z0-9]", "_", url.lower())[-40:]
-
-    return {
-        "id":          job_id,
-        "title":       title,
-        "company":     company,
-        "description": description,
-        "url":         url,
-    }
-
-
-# ── Main ───────────────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile",       required=True, help="Profile ID")
     parser.add_argument("--job-url",       required=True, help="Job posting URL")
-    parser.add_argument("--cover-letter",  action="store_true", help="Also generate cover letter")
+    parser.add_argument("--mode",          default="dump",
+                        choices=["dump", "save"],
+                        help="dump: fetch and print data | save: format sections to PDF")
+    parser.add_argument("--sections-json", default="",
+                        help="JSON string of CV sections (for --mode save)")
+    parser.add_argument("--cover-letter",  action="store_true")
+    parser.add_argument("--job-id",        default="",
+                        help="Optional job ID for filename")
     args = parser.parse_args()
 
-    result = {}
+    if args.mode == "dump":
+        # Fetch job markdown and profile — dump for Claude Code to reason over
+        profile = _mcp_call("get_profile", profile_id=args.profile)
+        if "error" in profile:
+            print(json.dumps({"error": f"Profile not found: {profile['error']}"}))
+            sys.exit(1)
 
-    # 1. Fetch profile from VPS
-    profile = _mcp_call("get_profile", profile_id=args.profile)
-    if "error" in profile:
-        result["error"] = f"Profile not found: {profile['error']}"
-        print(json.dumps(result))
-        sys.exit(1)
+        job_content = _mcp_call("firecrawl_scrape", url=args.job_url)
+        if "error" in job_content and not job_content.get("markdown"):
+            print(json.dumps({"error": f"Could not fetch job page: {job_content['error']}"}))
+            sys.exit(1)
 
-    # 2. Scrape job page
-    job = _scrape_job(args.job_url)
-    if "error" in job:
-        result["error"] = job["error"]
-        print(json.dumps(result))
-        sys.exit(1)
+        print(json.dumps({
+            "mode":        "dump",
+            "profile":     profile,
+            "job_url":     args.job_url,
+            "job_markdown": job_content.get("markdown", ""),
+            "job_metadata": job_content.get("metadata", {}),
+            "source":      job_content.get("source", "unknown"),
+            "instructions": (
+                "Read job_markdown and profile above. "
+                "Extract requirements, map to profile, write CV sections. "
+                "Then call: python generate_cv_standalone.py "
+                f"--profile {args.profile} --job-url '{args.job_url}' "
+                "--mode save --sections-json '<your_sections_json>'"
+            ),
+        }, indent=2))
 
-    CV_DIR.mkdir(parents=True, exist_ok=True)
+    elif args.mode == "save":
+        if not args.sections_json:
+            print(json.dumps({"error": "--sections-json required for --mode save"}))
+            sys.exit(1)
 
-    # 3. Generate CV
-    try:
-        from cv_generator import generate_cv, generate_cover_letter
-        cv = generate_cv(profile, job, out_dir=str(CV_DIR))
-        result["cv"] = {
-            "score":    cv["score"],
-            "matched":  cv["matched"][:8],
-            "missing":  cv["missing"][:5],
-            "txt_path": cv["txt_path"],
-            "pdf_path": cv["pdf_path"],
-        }
-    except Exception as e:
-        result["error"] = f"CV generation failed: {e}"
-        print(json.dumps(result))
-        sys.exit(1)
-
-    # 4. Optionally generate cover letter
-    if args.cover_letter:
         try:
-            cl = generate_cover_letter(profile, job, out_dir=str(CV_DIR))
-            result["cover_letter"] = {
-                "txt_path": cl["txt_path"],
-                "persona_applied": cl.get("persona_applied", False),
-            }
+            sections = json.loads(args.sections_json)
         except Exception as e:
-            result["cover_letter"] = {"error": str(e)}
+            print(json.dumps({"error": f"Invalid --sections-json: {e}"}))
+            sys.exit(1)
 
-    result["job_title"]   = job["title"]
-    result["company"]     = job["company"]
-    result["profile_id"]  = args.profile
+        profile = _mcp_call("get_profile", profile_id=args.profile)
+        if "error" in profile:
+            print(json.dumps({"error": f"Profile not found: {profile['error']}"}))
+            sys.exit(1)
 
-    print(json.dumps(result, indent=2))
+        job_meta = {
+            "id":      args.job_id or "custom",
+            "title":   sections.get("job_title", ""),
+            "company": sections.get("company", ""),
+        }
+
+        CV_DIR.mkdir(parents=True, exist_ok=True)
+
+        from cv_generator import generate_cv, generate_cover_letter
+
+        cv = generate_cv(sections, profile, job_meta, out_dir=str(CV_DIR))
+        result = {"cv": cv, "profile_id": args.profile, "job_url": args.job_url}
+
+        if args.cover_letter:
+            cover_text = sections.get("cover_letter_text", "")
+            cl = generate_cover_letter(profile, job_meta,
+                                       cover_text=cover_text,
+                                       out_dir=str(CV_DIR))
+            result["cover_letter"] = cl
+
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,8 @@ $servers = @(
     @{ mod = "dom_mcp.server";       port = 8710 },
     @{ mod = "cdp_mcp.server";       port = 8712 },
     @{ mod = "vps_mcp.server";       port = 8713 },
-    @{ mod = "schools_mcp.server";   port = 8714 }
+    @{ mod = "schools_mcp.server";    port = 8714 },
+    @{ mod = "ixbrowser_mcp.server";  port = 8715 }
 )
 
 # Load .env so MCP servers that read env vars at startup get the right values

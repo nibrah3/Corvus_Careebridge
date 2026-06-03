@@ -1,4 +1,4 @@
-﻿"""
+"""
 Capture MCP server.
 
 Tools:
@@ -22,6 +22,18 @@ from ._backend_gdi import capture as _gdi_cap, available as _gdi_ok
 from ._backend_dxcam import available as _dxcam_ok
 
 mcp = MinMCP("capture")
+
+_CDP_PORT = int(os.environ.get("CDP_PORT", "9222"))
+
+
+def _cdp_reachable() -> bool:
+    """Quick socket probe to check if a CDP debug port is listening."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", _CDP_PORT), timeout=1):
+            return True
+    except Exception:
+        return False
 
 # ── Single-shot backend selection ─────────────────────────────────────────────
 
@@ -81,22 +93,28 @@ def screenshot(
     height: Optional[int] = None,
     format: str = "jpeg",
     quality: int = 72,
+    purpose: str = "debug",
 ) -> dict:
     """
     Capture the screen and return a base64-encoded image for Claude vision.
 
-    Default (no args): captures full screen, crops centre 60% width, JPEG 72%.
-    This is Pipeline F — fastest single-shot with best token efficiency.
+    purpose: "debug" (always allowed) or describe task intent.
+    If purpose != "debug" and CDP is reachable, this call is blocked.
+    Use mcp__dom or mcp__cdp tools instead — they are more reliable and free.
 
-    Args:
-        x, y:         Top-left of capture region (default 0,0 = full screen).
-        width, height: Region size. Omit for full screen.
-        format:        "jpeg" (default, smaller) or "png" (lossless).
-        quality:       JPEG quality 1-95 (default 72).
-
-    Returns:
-        {base64: str, mime_type: str, width: int, height: int, size_kb: float}
+    Default (no args): full screen, centre 60% crop, JPEG 72% (Pipeline F).
     """
+    if purpose != "debug" and _cdp_reachable():
+        return {
+            "blocked": True,
+            "reason": (
+                "screenshot blocked: CDP is reachable on port "
+                f"{_CDP_PORT}. Use mcp__dom__get_accessibility_tree or "
+                "mcp__cdp__cdp_get_axtree instead. "
+                "Only call screenshot with purpose='debug' for diagnostics."
+            ),
+        }
+
     t0 = time.perf_counter()
     data, mime = _screenshot_bytes(x, y, width, height, format, quality)
     ms = (time.perf_counter() - t0) * 1000
@@ -197,7 +215,7 @@ def start_video_capture(fps: int = 30) -> str:
 
 
 @mcp.tool()
-def stop_video_capture(output_path: str = "D:/cb-core/capture_mcp/recording.mp4") -> str:
+def stop_video_capture(output_path: str = "E:/Corvus_Careebridge/capture_mcp/recording.mp4") -> str:
     """
     Stop recording and save frames as MP4.
 

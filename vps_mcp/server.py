@@ -1,11 +1,11 @@
-﻿"""
+"""
 vps_mcp — Desktop bridge to VPS pipeline.
 Runs on Desktop at port 8713.
 Connects to VPS via SSH tunnels:
   Redis:    localhost:6380 -> VPS:6379
   Postgres: localhost:5433 -> VPS:5432
   Crawlee:  localhost:3101 -> VPS:3100
-Start tunnels first: powershell D:\\cb-core\\scripts\\vps_tunnel.ps1
+Start tunnels first: powershell E:\\Corvus_Careebridge\\scripts\\vps_tunnel.ps1
 """
 import sys
 import os
@@ -18,10 +18,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _minmcp import MinMCP
 
 # Tunnel endpoints (SSH forward from Desktop)
-REDIS_HOST = os.environ.get("VPS_REDIS_HOST", "127.0.0.1")
-REDIS_PORT = int(os.environ.get("VPS_REDIS_PORT", "6380"))
-PG_DSN     = os.environ.get("VPS_PG_DSN", "postgresql://corvus:corvus-local-password@127.0.0.1:5433/careerbridge")
-CRAWLEE    = os.environ.get("VPS_CRAWLEE_URL", "http://127.0.0.1:3101")
+REDIS_HOST  = os.environ.get("VPS_REDIS_HOST",     "127.0.0.1")
+REDIS_PORT  = int(os.environ.get("VPS_REDIS_PORT", "6380"))
+PG_DSN      = os.environ.get("VPS_PG_DSN",         "postgresql://corvus:corvus-local-password@127.0.0.1:5433/careerbridge")
+CRAWLEE     = os.environ.get("VPS_CRAWLEE_URL",     "http://127.0.0.1:3101")
+FIRECRAWL   = os.environ.get("VPS_FIRECRAWL_URL",   "http://127.0.0.1:7788")
 
 mcp = MinMCP("vps_mcp")
 
@@ -789,6 +790,130 @@ def get_gap_report() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Firecrawl tools (VPS Firecrawl via SSH tunnel localhost:7788) ─────────────
+
+def _firecrawl_post(endpoint: str, payload: dict, timeout: int = 60) -> dict:
+    """POST to VPS Firecrawl through the SSH tunnel."""
+    url = f"{FIRECRAWL}/v1/{endpoint}"
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read())
+        except Exception:
+            detail = {"http_status": e.code}
+        return {"error": str(e), **detail}
+    except Exception as e:
+        # Fallback: raw urllib fetch with basic HTML strip
+        return {"error": str(e), "fallback": True}
+
+
+def _raw_fetch_fallback(url: str) -> str:
+    """Last-resort plain HTTP fetch when Firecrawl is unavailable."""
+    import re as _re
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            html = r.read().decode("utf-8", errors="replace")
+        text = _re.sub(r"<script[^>]*>[\s\S]*?</script>", " ", html, flags=_re.I)
+        text = _re.sub(r"<style[^>]*>[\s\S]*?</style>",  " ", text,  flags=_re.I)
+        text = _re.sub(r"<[^>]+>", " ", text)
+        text = _re.sub(r"&[a-z]+;", " ", text)
+        return _re.sub(r"\s+", " ", text).strip()[:8000]
+    except Exception as e:
+        return f"[fetch failed: {e}]"
+
+
+@mcp.tool()
+def firecrawl_scrape(url: str, formats: list = None) -> dict:
+    """
+    Scrape a URL via VPS Firecrawl (SSH tunnel → localhost:7788).
+    Returns clean markdown + metadata suitable for Claude Code to read directly.
+
+    Falls back to raw urllib fetch if Firecrawl tunnel is down.
+
+    Args:
+        url:     URL to scrape.
+        formats: List of output formats. Default: ["markdown"].
+
+    Returns:
+        { markdown, metadata: { title, description, url }, source }
+        source is "firecrawl" or "fallback_fetch".
+    """
+    payload = {
+        "url":     url,
+        "formats": formats or ["markdown"],
+    }
+    result = _firecrawl_post("scrape", payload)
+
+    if "error" in result or result.get("fallback"):
+        markdown = _raw_fetch_fallback(url)
+        return {
+            "markdown": markdown,
+            "metadata": {"url": url},
+            "source":   "fallback_fetch",
+            "warning":  result.get("error", "Firecrawl unavailable"),
+        }
+
+    data = result.get("data") or result
+    return {
+        "markdown": data.get("markdown") or data.get("content") or "",
+        "metadata": data.get("metadata") or {"url": url},
+        "source":   "firecrawl",
+    }
+
+
+@mcp.tool()
+def firecrawl_batch(urls: list, formats: list = None) -> dict:
+    """
+    Scrape multiple URLs via VPS Firecrawl in one batch request.
+
+    Args:
+        urls:    List of URLs to scrape (max 25 per call).
+        formats: Output formats. Default: ["markdown"].
+
+    Returns:
+        { results: [{ url, markdown, metadata }], count, source }
+    """
+    if not urls:
+        return {"results": [], "count": 0}
+
+    payload = {
+        "urls":    urls[:25],
+        "formats": formats or ["markdown"],
+    }
+    result = _firecrawl_post("batch/scrape", payload, timeout=120)
+
+    if "error" in result:
+        # Fall back to individual raw fetches
+        results = []
+        for url in urls[:25]:
+            results.append({
+                "url":      url,
+                "markdown": _raw_fetch_fallback(url),
+                "metadata": {"url": url},
+            })
+        return {"results": results, "count": len(results), "source": "fallback_fetch"}
+
+    data = result.get("data") or []
+    results = [
+        {
+            "url":      item.get("metadata", {}).get("url") or item.get("url", ""),
+            "markdown": item.get("markdown") or item.get("content") or "",
+            "metadata": item.get("metadata") or {},
+        }
+        for item in data
+    ]
+    return {"results": results, "count": len(results), "source": "firecrawl"}
 
 
 if __name__ == "__main__":

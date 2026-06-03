@@ -27,9 +27,15 @@ BLOCKED_PATTERNS = [
     r"dispatchEvent\s*\(\s*new\s+PointerEvent",
     r"dispatchEvent\s*\(\s*new\s+ClickEvent",
     r"dispatchEvent\s*\(\s*new\s+KeyboardEvent",
-    # Standalone new MouseEvent/PointerEvent construction (used to fire synthetic clicks)
+    # Standalone new MouseEvent/PointerEvent construction
     r"new\s+MouseEvent\s*\(",
     r"new\s+PointerEvent\s*\(",
+    # CDP protocol-level evaluation paths (additional layer)
+    r"Runtime\.evaluate\s*\(",
+    r"Page\.evaluate\s*\(",
+    # Form submission via JS reference
+    r"\.form\s*\.\s*submit\s*\(",
+    r"document\.forms\[",
 ]
 
 _BLOCK_RE = re.compile("|".join(BLOCKED_PATTERNS), re.IGNORECASE)

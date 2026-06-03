@@ -19,10 +19,29 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import json
+import re
 from typing import Optional
 
 from _minmcp import MinMCP
 from careerbridge.cdp_executor import CDPExecutor, CDPError
+
+# Server-side JS interaction blocker — mirrors hook_block_js_clicks.py.
+# Both layers must be bypassed to allow synthetic JS interaction (defense in depth).
+# Allowed: read-only eval, dispatchEvent(new Event('input'/'change')) for React inputs.
+_FORBIDDEN_JS = re.compile(
+    r"\.click\s*\("
+    r"|\.submit\s*\("
+    r"|HTMLElement\.prototype"
+    r"|dispatchEvent\s*\(\s*new\s+MouseEvent"
+    r"|dispatchEvent\s*\(\s*new\s+PointerEvent"
+    r"|dispatchEvent\s*\(\s*new\s+ClickEvent"
+    r"|dispatchEvent\s*\(\s*new\s+KeyboardEvent"
+    r"|new\s+MouseEvent\s*\("
+    r"|new\s+PointerEvent\s*\("
+    r"|Runtime\.evaluate"
+    r"|Page\.evaluate",
+    re.IGNORECASE,
+)
 
 mcp      = MinMCP("cdp-mcp")
 _executor: Optional[CDPExecutor] = None
@@ -167,11 +186,20 @@ def cdp_scroll(direction: str = "down", clicks: int = 3) -> str:
 @mcp.tool
 def cdp_eval(expression: str) -> str:
     """
-    Evaluate a JavaScript expression in the page context and return the result as JSON.
-    Useful for reading state, querying elements, or triggering JS functions directly.
-    Example: cdp_eval('document.querySelectorAll("input[type=radio]").length')
-    Example: cdp_eval('window.location.href')
+    Evaluate a read-only JavaScript expression and return the result as JSON.
+    Use for: querySelector, getBoundingClientRect, innerText, window.location, aria state.
+    NOT for: clicks, form submission, synthetic events — use humanizer_mcp for those.
+    Allowed exception: dispatchEvent(new Event('input'/'change')) for React controlled inputs.
     """
+    if _FORBIDDEN_JS.search(expression):
+        return json.dumps({
+            "blocked": True,
+            "reason": (
+                "cdp_eval blocked: expression contains a synthetic interaction pattern. "
+                "Use humanizer_mcp for clicks and input. "
+                f"Offending expression (first 120 chars): {expression[:120]!r}"
+            ),
+        })
     ex = _get_executor()
     try:
         result = ex.eval_js(expression)

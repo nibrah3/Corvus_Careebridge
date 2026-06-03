@@ -160,6 +160,31 @@ def analyse_image(image_path: str, prompt: str, model: str = "gemini-2.5-flash")
 
 
 @mcp.tool()
+def upload_image(image_path: str) -> dict:
+    """
+    Upload an image file to Gemini Files API for annotation or analysis.
+
+    Use for image annotation tasks where you have the source image file.
+    Prefer this over analyse_image() when you need to reference the file
+    in multiple calls or when the image is > 5MB.
+
+    Supports: JPEG, PNG, WEBP, GIF, BMP.
+
+    Args:
+        image_path: Local path to the image file.
+
+    Returns:
+        {uri, name, size_mb, state, upload_ms}
+        uri is passed to analyse_video() for analysis.
+    """
+    try:
+        from gemini_mcp._gemini import upload_video as _upload
+        return _upload(video_path=image_path)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
 def delete_file(file_name: str) -> dict:
     """
     Delete an uploaded file from Gemini File API to free quota.

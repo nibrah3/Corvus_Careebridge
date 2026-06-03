@@ -1,4 +1,20 @@
 """
+DEPRECATED — application_pipeline.py
+
+Superseded by skill_prepare_assessment.md + skill_assess_text.md.
+
+All new application and assessment work goes through the skill-based pipeline:
+  1. skill_prepare_assessment.md  — browser launch, CDP connect, page type detection
+  2. skill_assess_text.md         — form filling, MCQ, essay
+  3. skill_assess_video.md        — video annotation
+  4. skill_assess_image.md        — image annotation
+
+This file is kept for reference until skills are production-verified.
+Key issue with this file: uses gpt-4o-mini via OpenRouter as the autonomous
+browser agent — inconsistent with the architecture principle that Claude Code
+is the only LLM. Do not import from this module in new code.
+
+------------------------------------------------------------------------
 application_pipeline.py — Application form-filling pipeline.
 
 Single responsibility: drive one job application from page open to submission.
