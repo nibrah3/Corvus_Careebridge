@@ -59,3 +59,18 @@ When FALLBACK MODE is active (screenshot was taken for task work):
 - All answer submissions require supervised gate approval.
 - Notify via `mcp__telegram__notify("⚠️ Session in fallback mode — gate active")`.
 - Fallback mode clears when the session ends — not mid-session.
+
+---
+
+## On Error — Fallback Rules Enforcement
+
+**CDP tool returns "blocked: CDP available" but CDP is not working:**
+→ The CDP ping in capture_mcp checks port 9222 specifically.
+→ If IXBrowser uses a different port, set `CDP_PORT` env var on capture_mcp startup.
+→ Temporary fix: call `mcp__capture__screenshot(purpose="debug")` which bypasses the check.
+
+**hook_fallback_monitor fails to write to Redis:**
+→ Non-fatal. The hook still injects the gate instruction to Claude.
+→ The gate enforcement works even without Redis — it's belt-and-suspenders.
+
+→ Shared patterns: see `sops/sop_on_error_shared.md`

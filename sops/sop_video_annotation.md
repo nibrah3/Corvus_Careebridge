@@ -95,3 +95,13 @@ Delete the local temp video file.
 ### 9. Gate rule
 
 If ANY segment has confidence < 0.80, or if the platform format was unclear: go to supervised gate before submitting. Do not auto-submit uncertain annotations.
+
+## On Error
+
+For tunnel/MCP/Gemini failures: see sops/sop_on_error_shared.md.
+
+**Video annotation specific:**
+- Video download fails → try alternate URL from DOM (iframe src, video tag src)
+- Gemini upload timeout → retry once with 60s timeout
+- Gemini returns empty annotation → gate the answer; do not auto-submit
+- Screen recording fallback used → fallback mode active; all answers gated

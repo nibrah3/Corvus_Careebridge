@@ -69,19 +69,20 @@ VPS_CRITICAL_CONTAINERS = {
 }
 
 SERVERS = [
-    ("humanizer_mcp.server", 8701),
-    ("capture_mcp.server",   8702),
-    ("uia_mcp.server",       8703),
-    ("browser_mcp.server",   8704),
-    ("gemini_mcp.server",    8705),
-    ("telegram_mcp.server",  8706),
-    ("answer_mcp.server",    8707),
-    ("sqlite_mcp.server",    8708),
-    ("memory_mcp.server",    8709),
-    ("dom_mcp.server",       8710),
-    ("cdp_mcp.server",       8712),
-    ("vps_mcp.server",       8713),
-    ("schools_mcp.server",   8714),
+    ("humanizer_mcp.server",  8701),
+    ("capture_mcp.server",    8702),
+    ("uia_mcp.server",        8703),
+    ("browser_mcp.server",    8704),
+    ("gemini_mcp.server",     8705),
+    ("telegram_mcp.server",   8706),
+    ("answer_mcp.server",     8707),
+    ("sqlite_mcp.server",     8708),
+    ("memory_mcp.server",     8709),
+    ("dom_mcp.server",        8710),
+    ("cdp_mcp.server",        8712),
+    ("vps_mcp.server",        8713),
+    ("schools_mcp.server",    8714),
+    ("ixbrowser_mcp.server",  8715),   # IXBrowser profile manager (added 2026-06)
 ]
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -141,7 +142,7 @@ def _tg_send(text: str) -> None:
 # ── Database ─────────────────────────────────────────────────────────────────
 
 def _db_init() -> None:
-    """Create health_issues table if it doesn't exist."""
+    """Create health_issues and restart_events tables."""
     try:
         with sqlite3.connect(str(DB)) as conn:
             conn.execute("""
@@ -154,6 +155,21 @@ def _db_init() -> None:
                     status        TEXT NOT NULL DEFAULT 'pending'
                 )
             """)
+            # restart_events: fine-grained log read by skill_health_sweep for pattern analysis
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS restart_events (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts          INTEGER NOT NULL,
+                    module      TEXT NOT NULL,
+                    port        INTEGER NOT NULL,
+                    restart_num INTEGER NOT NULL,
+                    reason      TEXT DEFAULT 'port_down'
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS restart_events_ts "
+                "ON restart_events (ts DESC)"
+            )
             conn.commit()
     except Exception as exc:
         log.warning("DB init failed: %s", exc)
@@ -172,6 +188,21 @@ def _db_write_issue(mod: str, port: int, restart_count: int) -> None:
             conn.commit()
     except Exception as exc:
         log.warning("DB write failed: %s", exc)
+
+
+def _db_log_restart(mod: str, port: int, restart_num: int,
+                    reason: str = "port_down") -> None:
+    """Log every restart event — skill_health_sweep reads this for pattern analysis."""
+    try:
+        with sqlite3.connect(str(DB)) as conn:
+            conn.execute(
+                "INSERT INTO restart_events (ts, module, port, restart_num, reason) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (int(time.monotonic()), mod, port, restart_num, reason),
+            )
+            conn.commit()
+    except Exception as exc:
+        log.debug("restart_events write failed: %s", exc)
 
 
 # ── Port probe ────────────────────────────────────────────────────────────────
@@ -390,6 +421,7 @@ def run() -> None:
 
             log.warning("Port %d (%s) DOWN — restart #%d", port, mod, st.restart_count)
             _start_server(mod, port)
+            _db_log_restart(mod, port, st.restart_count)
 
             if st.restart_count <= ALERT_AFTER:
                 _tg_send(f"[HEALTH] {mod} (port {port}) was down. Restarted (#{st.restart_count}).")

@@ -101,3 +101,12 @@ Complete the form following `sop_text_assessment.md`.
 - Never fabricate skills or experience not in the profile.
 - Always confirm with user before submitting.
 - The CV content you write here IS the CV — format_cv.py only converts it to PDF.
+
+## On Error
+
+For Firecrawl/VPS/IXBrowser failures: see sops/sop_on_error_shared.md.
+
+**CV skill specific:**
+- Firecrawl returns empty → ask user to paste job description text directly
+- format_cv.py fails → output plain text CV instead; note PDF generation failed
+- User does not confirm within session → stop; job stays in pending state

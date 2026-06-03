@@ -90,3 +90,12 @@ Call `mcp__telegram__notify("Clean: kept N, blocked N | {job_type breakdown}")`.
 - Run in a single pass — do not pause between items.
 - Use Firecrawl (`mcp__vps__firecrawl_scrape`) only when the raw_content is insufficient to classify. It costs a scrape call.
 - False negatives (blocking a real gig) are worse than false positives. When uncertain: keep.
+
+## On Error
+
+For tunnel/MCP failures: see sops/sop_on_error_shared.md.
+
+**Data cleaning specific:**
+- Firecrawl returns empty for an ambiguous URL → classify from URL structure alone; mark lower confidence
+- search_terms table not found → run upsert_search_term once to trigger table creation
+- Batch size too large (timeout) → reduce to 25 items; retry

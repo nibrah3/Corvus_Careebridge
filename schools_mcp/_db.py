@@ -70,16 +70,19 @@ def ensure_table() -> None:
 
 
 def was_recently_processed(url: str, within_days: int = 7) -> bool:
-    """Return True if this URL was already saved within the last N days."""
+    """
+    Return True if this URL already exists in the schools table (analyzed).
+    Schools are collected once and analyzed once — no re-analysis needed.
+    The within_days parameter is kept for API compatibility but ignored.
+    """
     if not _HAS_DB:
         return False
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
         with _connect() as c:
             with c.cursor() as cur:
                 cur.execute(
-                    "SELECT 1 FROM schools WHERE url_hash=%s AND updated_at > %s",
-                    (url_hash(url), cutoff),
+                    "SELECT 1 FROM schools WHERE url_hash=%s",
+                    (url_hash(url),),
                 )
                 return cur.fetchone() is not None
     except Exception as e:

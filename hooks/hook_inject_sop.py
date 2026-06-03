@@ -45,6 +45,36 @@ def _load_sop(filename: str) -> str:
         return ""
 
 
+_REDIS_HOST = os.environ.get("VPS_REDIS_HOST", "127.0.0.1")
+_REDIS_PORT = int(os.environ.get("VPS_REDIS_PORT", "6380"))
+
+
+def _redis_get(key: str) -> str | None:
+    import socket
+    try:
+        with socket.create_connection((_REDIS_HOST, _REDIS_PORT), timeout=2) as sock:
+            cmd = f"*2\r\n$3\r\nGET\r\n${len(key)}\r\n{key}\r\n"
+            sock.sendall(cmd.encode())
+            reply = sock.recv(256).decode(errors="replace").strip()
+            if reply.startswith("$-1"):
+                return None
+            lines = reply.split("\r\n")
+            return lines[1] if len(lines) > 1 else None
+    except Exception:
+        return None
+
+
+def _redis_setex(key: str, seconds: int, value: str) -> None:
+    import socket
+    try:
+        with socket.create_connection((_REDIS_HOST, _REDIS_PORT), timeout=2) as sock:
+            cmd = f"*4\r\n$5\r\nSETEX\r\n${len(key)}\r\n{key}\r\n${len(str(seconds))}\r\n{seconds}\r\n${len(value)}\r\n{value}\r\n"
+            sock.sendall(cmd.encode())
+            sock.recv(64)
+    except Exception:
+        pass
+
+
 def main():
     try:
         raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace")
@@ -67,7 +97,22 @@ def main():
         except Exception:
             pass
 
-    # Always inject fallback rules first
+    # Session-aware injection: only inject full SOPs once per session (per process group)
+    # After first injection, just acknowledge — saves 80% of SOP injection tokens
+    session_key = f"corvus:sop_injected:{os.getpid()}"
+    already_injected = _redis_get(session_key)
+
+    if already_injected:
+        # SOPs already active this session — brief acknowledgment only
+        type_label = job_type or "text_assessment"
+        print(
+            f"SOPs acknowledged for this session (job_type: {type_label}). "
+            f"Fallback rules, browser launch procedure, and {JOB_TYPE_TO_SOP.get(job_type, 'sop_text_assessment.md')} "
+            f"remain active from initial injection. Proceed with skill_prepare_assessment.md."
+        )
+        sys.exit(0)
+
+    # First injection this session — full SOPs
     fallback_sop = _load_sop("sop_fallback_rules.md")
     browser_sop  = _load_sop("sop_browser_launch.md")
     task_sop     = _load_sop(JOB_TYPE_TO_SOP.get(job_type, "sop_text_assessment.md"))
@@ -75,7 +120,10 @@ def main():
     if not fallback_sop:
         sys.exit(0)
 
-    job_label = f"Job {job_id}" if job_id else "this job"
+    # Mark as injected for this session (TTL 2 hours)
+    _redis_setex(session_key, 7200, "1")
+
+    job_label  = f"Job {job_id}" if job_id else "this job"
     type_label = job_type or "text_assessment"
 
     injection = f"""

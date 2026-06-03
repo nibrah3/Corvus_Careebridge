@@ -51,3 +51,12 @@ Screen recording (fallback) always triggers fallback mode and requires gate.
 
 `mcp__vps__update_job_status(job_id, status="applied")`.
 `mcp__telegram__notify("✅ Video annotation complete: {job_title}")`.
+
+## On Error
+
+For Gemini/tunnel failures: see sops/sop_on_error_shared.md.
+
+**Video skill specific:**
+- Video too large (>2GB) → split into segments; upload each; combine annotations
+- Download fails → try screen recording fallback (fallback mode activates automatically)
+- Gemini stuck PROCESSING >90s → delete file; re-upload; if fails again: report and stop

@@ -77,3 +77,12 @@ If confidence < 0.80 on any annotation, or if the image has poor quality/ambiguo
 ### 9. Cleanup
 
 Delete local temp image file.
+
+## On Error
+
+For tunnel/MCP/Gemini failures: see sops/sop_on_error_shared.md.
+
+**Image annotation specific:**
+- Image download blocked (auth required) → screenshot with purpose=annotation; fallback mode active
+- Gemini upload fails → stop; do not screenshot-substitute for annotation
+- Annotation format unclear → gate answer with format question for operator

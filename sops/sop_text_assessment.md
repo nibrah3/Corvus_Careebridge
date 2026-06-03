@@ -76,3 +76,13 @@ When all pages are complete and Submit button is present:
 - If a required field is found but cannot be answered (missing profile data): leave blank and note in gate message
 - If a CAPTCHA appears: stop and call `mcp__telegram__notify("CAPTCHA — manual intervention needed")`
 - If session expires / login wall appears: reconnect via `mcp__ixbrowser__reconnect()` and navigate back
+
+## On Error
+
+For tunnel/MCP/CDP/IXBrowser failures: see sops/sop_on_error_shared.md.
+
+**Text assessment specific:**
+- Question DOM not found → scroll down and re-read accessibility tree
+- OTP field appears → check Redis for verification code via verify_code_injector
+- CAPTCHA detected → stop; notify Telegram manual intervention needed
+- Session expires mid-assessment → reconnect via ixbrowser_mcp.reconnect, navigate back

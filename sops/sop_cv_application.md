@@ -81,3 +81,13 @@ Complete the remaining form fields following `sop_text_assessment.md`.
 - Never generate a CV for a job the candidate is clearly unqualified for without flagging the gaps.
 - The CV summary and skills must use the JD's exact phrasing — ATS keyword matching depends on this.
 - Always confirm with the user before submitting the application.
+
+## On Error
+
+For tunnel/MCP/CDP/IXBrowser failures: see sops/sop_on_error_shared.md.
+
+**CV application specific:**
+- Firecrawl returns empty for job URL → try cdp_eval(document.body.innerText) if browser open; else ask user to paste JD
+- cv_format_tool fails → save CV as plain text; note PDF generation error in report
+- File upload field not found → ask user to manually upload PDF; continue with form
+- Application already submitted (duplicate detected) → report to user; mark job applied

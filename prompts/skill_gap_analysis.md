@@ -78,7 +78,16 @@ Include: top 3 priorities, count of archived platforms, any critical gaps.
 
 ## Output also saved to prompts/
 
-After analysis, update `D:\cb-core\prompts\discovery_strategy_current.md` with the
+After analysis, update `E:\Corvus_Careebridge\prompts\discovery_strategy_current.md` with the
 full strategy text. Crawlee's next discovery run reads this to prioritize its searches.
 The file should be structured so the serper_graph_expand.py keyword expansion
 can use it to generate targeted Serper queries.
+
+## On Error
+
+For VPS/tunnel failures: see sops/sop_on_error_shared.md.
+
+**Gap analysis specific:**
+- get_gap_report returns error → check postgres connection; retry once
+- memory_mcp write fails → save strategy to discovery_strategy_current.md only
+- No underrepresented categories found (all healthy) → still write strategy noting system is well-balanced

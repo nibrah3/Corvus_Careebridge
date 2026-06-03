@@ -794,3 +794,65 @@ if __name__ == "__main__":
     print(f"Keywords:     {len(all_kw)}")
     ats = [s for c in CATEGORIES for s in c.get("ats_slugs", [])]
     print(f"ATS slugs:    {len(ats)}")
+
+
+# ── Scout extension: categories added from live system findings ───────────────
+# Add new categories here as Corvus Scout discovers them.
+
+CATEGORIES.extend([
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # AGENCY WRITING & DOCUMENT SERVICES
+    # Small agencies (not freelance platforms) that hire remote writers directly
+    # for thesis, business proposals, grant writing, academic documents.
+    # Discovery method: Google with negative platform filters + LinkedIn company search.
+    # ──────────────────────────────────────────────────────────────────────────
+    {
+        "id": "agency_writing",
+        "name": "Writing Agency & Document Services",
+        "pay_tier": "mid",
+        "keywords": [
+            '"writers wanted" thesis academic remote',
+            '"academic writing company" "join our team"',
+            '"business proposal writer" remote contractor',
+            '"grant writing agency" freelance writer',
+            '"ghostwriting agency" remote writers hiring',
+            '"content writing agency" writers wanted -upwork -freelancer -fiverr',
+            '"technical writing agency" remote hire',
+            '"become a writer" agency -upwork -freelancer',
+            '"join our writing team" remote -fiverr',
+            '"SEO content agency" contractor writer remote',
+            'thesis writing service "hire writers"',
+            '"academic ghostwriting" remote "work with us"',
+            'dissertation writing company "writers wanted"',
+            '"business writing company" remote freelance -upwork',
+            '"white paper writer" agency contract remote',
+            '"copywriting agency" contractors remote -fiverr',
+        ],
+        "platforms": [
+            {"name": "WriterAccess",     "url": "https://www.writeraccess.com/",      "scrape": "direct"},
+            {"name": "ContentFly",       "url": "https://contentfly.com/",            "scrape": "direct"},
+            {"name": "Scripted",         "url": "https://www.scripted.com/",          "scrape": "direct"},
+            {"name": "ClearVoice",       "url": "https://www.clearvoice.com/",        "scrape": "direct"},
+            {"name": "Contently",        "url": "https://contently.com/",             "scrape": "direct"},
+            {"name": "Crowd Content",    "url": "https://www.crowdcontent.com/",      "scrape": "direct"},
+            {"name": "Skyword",          "url": "https://www.skyword.com/",           "scrape": "direct"},
+            {"name": "Draft",            "url": "https://draft.co/",                  "scrape": "direct"},
+            {"name": "Brafton",          "url": "https://www.brafton.com/careers/",  "scrape": "direct"},
+        ],
+        "ats_slugs": [],
+        "job_boards": ["problogger", "writejobs", "journalism.jobs"],
+        "reddit_subs": ["r/freelancewriters", "r/forhire", "r/HireaWriter",
+                        "r/copywriting", "r/writing"],
+        "linkedin_queries": [
+            "academic writing agency hiring writers",
+            "business document services remote writer",
+            "thesis writing company writers wanted",
+            "content agency contractor writer remote",
+        ],
+        "discovery_method": "google_negative_filter",
+        "notes": "Small agencies, not platforms. Find via Google with -upwork -freelancer -fiverr. "
+                 "Also LinkedIn company search. Precision Consultants is an example of this category.",
+    },
+
+])

@@ -53,3 +53,13 @@ If the browser redirected to a login page or error page: report and stop — do 
 - Never open Chrome directly — always go through `ixbrowser_mcp`. IXBrowser manages profile isolation and stealth fingerprinting.
 - If `cdp_url` is already known (passed in from a prior step), skip Step 1 and go directly to Step 2.
 - The `path` field in the connect response ("api" or "psutil") is informational — do not branch on it.
+
+## On Error
+
+For all connection, MCP, CDP, and IXBrowser failures: see sops/sop_on_error_shared.md.
+
+**Browser launch specific:**
+- IXBrowser API unreachable → launch IXBrowser.exe, wait 15s (shared pattern)
+- Tab detection: no matching tab → open new tab; never assume old session valid
+- DOM tree empty after navigation → wait 5s, retry; then screenshot(purpose=debug)
+- Login wall → stop: notify Telegram login required for profile on url

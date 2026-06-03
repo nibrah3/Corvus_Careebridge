@@ -29,6 +29,8 @@ _FIELDS = ",".join([
     "school.predominant_degree",
     "school.open_admissions_policy",
     "school.ownership",
+    "aid.federal_loan_rate",   # Title IV eligibility proxy — must be > 0
+    "aid.pell_grant_rate",     # Need-based aid availability
 ])
 
 # Map our filter names to Scorecard query params for pre-filtering candidates
@@ -73,15 +75,17 @@ def _norm(raw: dict) -> Optional[dict]:
     degree = raw.get("school.predominant_degree")
     online  = bool(raw.get("school.online_only"))
     return {
-        "scorecard_id":   raw.get("id"),
-        "name":           name,
-        "url":            url,
-        "city":           raw.get("school.city", ""),
-        "state":          raw.get("school.state", ""),
-        "online_only":    online,
-        "open_admissions":bool(raw.get("school.open_admissions_policy")),
-        "is_community_college": degree == 2,
-        "ownership":      raw.get("school.ownership"),  # 1=public, 2=nonprofit, 3=for-profit
+        "scorecard_id":        raw.get("id"),
+        "name":                name,
+        "url":                 url,
+        "city":                raw.get("school.city", ""),
+        "state":               raw.get("school.state", ""),
+        "online_only":         online,
+        "open_admissions":     bool(raw.get("school.open_admissions_policy")),
+        "is_community_college":degree == 2,
+        "ownership":           raw.get("school.ownership"),
+        "federal_loan_rate":   float(raw.get("aid.federal_loan_rate") or 0),
+        "pell_grant_rate":     float(raw.get("aid.pell_grant_rate") or 0),
     }
 
 
@@ -94,11 +98,13 @@ def fetch_candidates(filters: list[str], limit: int = 100) -> list[dict]:
         log.warning("COLLEGE_SCORECARD_API_KEY missing — skipping gov API round")
         return []
 
-    # Build query set: always include online + open-admissions searches,
-    # plus filter-specific param overrides
+    # Build query set: only schools with active federal loan participation
+    # (aid.federal_loan_rate > 0 means Title IV eligible = accredited)
     query_params: list[dict] = [
-        {"school.online_only": 1, "school.operating": 1},
-        {"school.open_admissions_policy": 1, "school.operating": 1},
+        {"school.online_only": 1,            "school.operating": 1,
+         "aid.federal_loan_rate__range": "0.01..1.0"},
+        {"school.open_admissions_policy": 1, "school.operating": 1,
+         "aid.federal_loan_rate__range": "0.01..1.0"},
     ]
     for f in (filters or []):
         extra = _FILTER_PARAMS.get(f)

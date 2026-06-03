@@ -36,3 +36,12 @@ Key tool sequence:
 
 Call `mcp__vps__update_job_status(job_id, status="applied")`.
 Call `mcp__telegram__notify("✅ Assessment complete: {job_title} / {profile_name}")`.
+
+## On Error
+
+For CDP/IXBrowser/tunnel failures: see sops/sop_on_error_shared.md.
+
+**Text assessment specific:**
+- DOM tree empty → scroll + retry once; then screenshot(purpose=debug)
+- Gate push fails → write to SQLite backup; notify operator with answer content
+- CAPTCHA detected → stop; Telegram alert; mark job status=captcha_blocked

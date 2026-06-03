@@ -70,3 +70,12 @@ If count = 0: nothing due, exit silently.
 - Never demote a Tier 1 company to Tier 0 in a single poll — go via Tier 2 or 3 first.
 - If you can't reach a page (network error, timeout): leave the tier unchanged,
   update `last_checked_at` anyway, and note the error in `tier_reason`.
+
+## On Error
+
+For VPS/tunnel/Firecrawl failures: see sops/sop_on_error_shared.md.
+
+**Catalogue poll specific:**
+- Company careers page returns 404 → set tier=0 (archive); note reason
+- Firecrawl timeout on a page → skip that company; leave tier unchanged; update last_checked_at
+- No new listings after 5+ consecutive polls → demote tier by 1 (never skip to tier=0 in one step)

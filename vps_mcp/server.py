@@ -219,15 +219,21 @@ def skip_job(job_id: int) -> dict:
 
 
 @mcp.tool()
-def list_jobs(status: str = "", limit: int = 20) -> dict:
-    """List jobs from VPS postgres, optionally filtered by status."""
+def list_jobs(status: str = "", limit: int = 20, fields: str = "") -> dict:
+    """
+    List jobs from VPS postgres, optionally filtered by status.
+    fields: comma-separated column names to return (default: id,url,title,company,job_type,status).
+    Pass fields='*' for all columns. Keeping fields minimal reduces token usage significantly.
+    """
+    default_fields = "id, url, title, company, job_type, status, discovered_at"
+    select = "*" if fields == "*" else (fields.replace(",", ", ") if fields else default_fields)
     try:
         conn = _pg()
         cur = conn.cursor(cursor_factory=__import__("psycopg2.extras", fromlist=["RealDictCursor"]).RealDictCursor)
         if status:
-            cur.execute("SELECT * FROM jobs WHERE status=%s ORDER BY discovered_at DESC LIMIT %s", (status, limit))
+            cur.execute(f"SELECT {select} FROM jobs WHERE status=%s ORDER BY discovered_at DESC LIMIT %s", (status, limit))
         else:
-            cur.execute("SELECT * FROM jobs ORDER BY discovered_at DESC LIMIT %s", (limit,))
+            cur.execute(f"SELECT {select} FROM jobs ORDER BY discovered_at DESC LIMIT %s", (limit,))
         rows = [_row_to_dict(r) for r in cur.fetchall()]
         return {"jobs": rows, "count": len(rows)}
     except Exception as e:
@@ -609,16 +615,16 @@ def dispatch_job_to_node(job_id: int, node_id: str) -> dict:
 def get_raw_discoveries(limit: int = 50) -> dict:
     """
     Return unprocessed raw discoveries for Claude Code to gate.
-    These are URLs collected by Crawlee/Firecrawl before any filtering.
-    Claude Code reads each one, decides keep/block/job_type, then calls
-    upsert_job() or mark_raw_blocked() for each.
+    raw_content is capped at 500 chars — sufficient for keep/block decisions.
+    For ambiguous items, call firecrawl_scrape(url) to get full content.
     """
     try:
         conn = _pg()
         cur = conn.cursor(cursor_factory=__import__("psycopg2.extras", fromlist=["RealDictCursor"]).RealDictCursor)
         cur.execute(
             """
-            SELECT id, url, title, company, source, raw_content, discovered_at
+            SELECT id, url, title, company, source, source_query,
+                   LEFT(raw_content, 500) AS raw_content, discovered_at
             FROM raw_discoveries
             WHERE processed = FALSE AND blocked = FALSE
             ORDER BY discovered_at DESC
@@ -834,20 +840,17 @@ def _raw_fetch_fallback(url: str) -> str:
 
 
 @mcp.tool()
-def firecrawl_scrape(url: str, formats: list = None) -> dict:
+def firecrawl_scrape(url: str, formats: list = None,
+                     summarize_for_gating: bool = False) -> dict:
     """
     Scrape a URL via VPS Firecrawl (SSH tunnel → localhost:7788).
-    Returns clean markdown + metadata suitable for Claude Code to read directly.
+    Returns clean markdown + metadata.
+
+    summarize_for_gating=True: returns a compact ~500-char summary optimized for
+    keep/block gating decisions. Use for bulk discovery processing to save tokens.
+    summarize_for_gating=False (default): returns up to 4000 chars of markdown.
 
     Falls back to raw urllib fetch if Firecrawl tunnel is down.
-
-    Args:
-        url:     URL to scrape.
-        formats: List of output formats. Default: ["markdown"].
-
-    Returns:
-        { markdown, metadata: { title, description, url }, source }
-        source is "firecrawl" or "fallback_fetch".
     """
     payload = {
         "url":     url,
@@ -864,9 +867,24 @@ def firecrawl_scrape(url: str, formats: list = None) -> dict:
             "warning":  result.get("error", "Firecrawl unavailable"),
         }
 
-    data = result.get("data") or result
+    data     = result.get("data") or result
+    markdown = data.get("markdown") or data.get("content") or ""
+
+    if summarize_for_gating and markdown:
+        # Extract key lines: title, headings, lines with job-related terms
+        import re as _re
+        job_terms = {"apply", "join", "hire", "remote", "freelance", "contractor",
+                     "task", "annotation", "work from home", "salary", "rate", "pay"}
+        lines = markdown.split("\n")
+        kept = []
+        for line in lines[:80]:  # scan first 80 lines
+            ll = line.lower()
+            if line.startswith("#") or any(t in ll for t in job_terms):
+                kept.append(line.strip())
+        markdown = " | ".join(kept)[:500] if kept else markdown[:500]
+
     return {
-        "markdown": data.get("markdown") or data.get("content") or "",
+        "markdown": markdown[:4000] if not summarize_for_gating else markdown,
         "metadata": data.get("metadata") or {"url": url},
         "source":   "firecrawl",
     }
@@ -914,6 +932,184 @@ def firecrawl_batch(urls: list, formats: list = None) -> dict:
         for item in data
     ]
     return {"results": results, "count": len(results), "source": "firecrawl"}
+
+
+# ── Search terms (proxied from postgres) ─────────────────────────────────────
+
+@mcp.tool()
+def upsert_search_term(term: str, category: str = "", priority: str = "normal",
+                       source: str = "seed") -> dict:
+    """Add or update a discovery search term in the search_terms table."""
+    try:
+        conn = _pg()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS search_terms (
+                id SERIAL PRIMARY KEY, term TEXT NOT NULL UNIQUE,
+                category TEXT, priority TEXT DEFAULT 'normal',
+                source TEXT DEFAULT 'seed', active BOOLEAN DEFAULT TRUE,
+                last_used_at TIMESTAMPTZ, hit_count INT DEFAULT 0,
+                gig_count INT DEFAULT 0, gig_rate FLOAT DEFAULT 0.0,
+                added_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            INSERT INTO search_terms (term, category, priority, source)
+            VALUES (%s,%s,%s,%s)
+            ON CONFLICT (term) DO UPDATE SET
+                category=COALESCE(NULLIF(EXCLUDED.category,''), search_terms.category),
+                priority=EXCLUDED.priority, active=TRUE
+        """, (term, category or None, priority, source))
+        return {"ok": True, "term": term}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_active_search_terms(limit: int = 100) -> dict:
+    """Return active search terms ordered by priority then gig_rate."""
+    try:
+        conn = _pg()
+        cur = conn.cursor(cursor_factory=__import__("psycopg2.extras", fromlist=["RealDictCursor"]).RealDictCursor)
+        cur.execute("""
+            SELECT term, category, priority, gig_rate, hit_count
+            FROM search_terms WHERE active=TRUE
+            ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
+                     gig_rate DESC NULLS LAST
+            LIMIT %s
+        """, (limit,))
+        return {"terms": [_row_to_dict(r) for r in cur.fetchall()]}
+    except Exception as e:
+        return {"error": str(e), "terms": []}
+
+
+@mcp.tool()
+def update_term_performance(term: str, hits: int = 0, gig_hits: int = 0) -> dict:
+    """Update gig_rate for a search term after a gate run. Auto-tunes priority."""
+    try:
+        conn = _pg()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE search_terms
+            SET hit_count=hit_count+%s, gig_count=gig_count+%s, last_used_at=NOW(),
+                gig_rate=CASE WHEN (hit_count+%s)>0
+                         THEN (gig_count+%s)::float/(hit_count+%s) ELSE 0 END
+            WHERE term=%s RETURNING hit_count, gig_count, gig_rate
+        """, (hits, gig_hits, hits, gig_hits, hits, term))
+        row = cur.fetchone()
+        if not row:
+            return {"error": f"Term not found: {term}"}
+        hit_count, gig_count, gig_rate = row
+        action = "updated"
+        if hit_count >= 20 and gig_rate < 0.05:
+            cur.execute("UPDATE search_terms SET active=FALSE WHERE term=%s", (term,))
+            action = "deactivated"
+        elif gig_rate > 0.40:
+            cur.execute("UPDATE search_terms SET priority='high' WHERE term=%s", (term,))
+            action = "promoted"
+        return {"ok": True, "term": term, "hit_count": hit_count,
+                "gig_rate": round(gig_rate, 3), "action": action}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Raw schools (staging) ─────────────────────────────────────────────────────
+
+@mcp.tool()
+def push_raw_school(url: str, name: str = "", raw_content: str = "",
+                    scorecard_id: str = "", source: str = "scorecard",
+                    federal_loan_rate: float = 0.0, pell_grant_rate: float = 0.0,
+                    is_cc: bool = False, online_only: bool = False,
+                    state: str = "", city: str = "") -> dict:
+    """Push a raw school to staging table. Claude Code analyzes it later."""
+    try:
+        conn = _pg()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS raw_schools (
+                id SERIAL PRIMARY KEY, url TEXT NOT NULL UNIQUE,
+                name TEXT, raw_content TEXT, scorecard_id TEXT, source TEXT,
+                federal_loan_rate FLOAT, pell_grant_rate FLOAT,
+                is_cc BOOLEAN DEFAULT FALSE, online_only BOOLEAN DEFAULT FALSE,
+                state TEXT, city TEXT, processed BOOLEAN DEFAULT FALSE,
+                discovered_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            INSERT INTO raw_schools
+                (url,name,raw_content,scorecard_id,source,federal_loan_rate,
+                 pell_grant_rate,is_cc,online_only,state,city)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (url) DO NOTHING RETURNING id
+        """, (url, name or None, (raw_content or "")[:3000], scorecard_id or None,
+              source, federal_loan_rate, pell_grant_rate, is_cc, online_only,
+              state or None, city or None))
+        row = cur.fetchone()
+        return {"ok": True, "new": bool(row)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_raw_schools(limit: int = 25) -> dict:
+    """Return unprocessed raw schools for Claude Code analysis."""
+    try:
+        conn = _pg()
+        cur = conn.cursor(cursor_factory=__import__("psycopg2.extras", fromlist=["RealDictCursor"]).RealDictCursor)
+        cur.execute("""
+            SELECT id, url, name, LEFT(raw_content,2000) AS raw_content,
+                   scorecard_id, source, federal_loan_rate, pell_grant_rate,
+                   is_cc, online_only, state, city
+            FROM raw_schools WHERE processed=FALSE
+            ORDER BY federal_loan_rate DESC NULLS LAST, discovered_at ASC
+            LIMIT %s
+        """, (limit,))
+        return {"schools": [_row_to_dict(r) for r in cur.fetchall()], "count": 0}
+    except Exception as e:
+        return {"error": str(e), "schools": []}
+
+
+@mcp.tool()
+def mark_school_processed(school_id: int) -> dict:
+    """Mark a raw school as processed after Claude Code analyzed it."""
+    try:
+        conn = _pg()
+        conn.cursor().execute(
+            "UPDATE raw_schools SET processed=TRUE WHERE id=%s", (school_id,))
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Raw discoveries push (from corvus_discovery.py) ──────────────────────────
+
+@mcp.tool()
+def push_raw_discovery(url: str, title: str = "", company: str = "",
+                       raw_content: str = "", source: str = "",
+                       source_query: str = "") -> dict:
+    """Push one raw discovery URL to staging. Skips duplicates silently."""
+    try:
+        conn = _pg()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS raw_discoveries (
+                id SERIAL PRIMARY KEY, url TEXT NOT NULL UNIQUE,
+                title TEXT, company TEXT, raw_content TEXT,
+                source TEXT, source_query TEXT,
+                processed BOOLEAN DEFAULT FALSE, blocked BOOLEAN DEFAULT FALSE,
+                block_reason TEXT, discovered_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            INSERT INTO raw_discoveries (url,title,company,raw_content,source,source_query)
+            VALUES (%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (url) DO NOTHING RETURNING id
+        """, (url, title or None, company or None, (raw_content or "")[:2000],
+              source or None, source_query or None))
+        row = cur.fetchone()
+        return {"ok": True, "new": bool(row)}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 if __name__ == "__main__":

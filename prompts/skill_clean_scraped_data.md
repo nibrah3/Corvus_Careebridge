@@ -50,3 +50,12 @@ Call `mcp__telegram__notify("Gate: kept N, blocked N, enriched N | pending: X")`
 - Never approve or submit jobs. Gate and classify only.
 - False negatives (blocking real gigs) are worse than false positives. Doubt = keep.
 - Complete all 50 in a single pass without pausing between items.
+
+## On Error
+
+For VPS/tunnel failures: see sops/sop_on_error_shared.md.
+
+**Clean scraped data specific:**
+- VPS tools unreachable → check tunnel; retry once; if still down: skip cycle, notify Telegram
+- search_terms update fails → non-fatal; log but continue gating
+- memory_mcp unreachable → skip memory steps; gate continues without Scout context

@@ -77,3 +77,12 @@ Pass the `cdp_url`, `profile`, and `job_url` into the next step.
 - Never skip this skill and go directly to an assessment skill.
 - Never take any assessment action before completing Steps 1-3.
 - If browser connection fails twice: stop and notify user via Telegram.
+
+## On Error
+
+For IXBrowser/CDP/tunnel failures: see sops/sop_on_error_shared.md.
+
+**Prepare assessment specific:**
+- IXBrowser fails to connect twice → stop; notify Telegram 'Browser failed for profile {id}'
+- Page type detection unclear → screenshot(purpose=debug); describe to user; ask how to proceed
+- Assessment URL returns 404 → report 'job URL appears invalid'; mark job status=error

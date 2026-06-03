@@ -1,0 +1,40 @@
+# Corvus VPS Crontab
+# Install: crontab -e → paste these entries
+# Claude Code binary must be in PATH: which claude
+# Log directory: /opt/corvus/logs/ (must exist)
+
+# ── Discovery collection (dumb pipes — no LLM) ────────────────────────────────
+
+# Serper queries: every 3 hours
+0 */3 * * *  cd /opt/corvus && python3 corvus_discovery.py --source serper >> /opt/corvus/logs/discovery_serper.log 2>&1
+
+# Reddit crawl: every 4 hours
+0 */4 * * *  cd /opt/corvus && python3 corvus_discovery.py --source reddit >> /opt/corvus/logs/discovery_reddit.log 2>&1
+
+# Greenhouse ATS boards: every 2 hours
+0 */2 * * *  cd /opt/corvus && python3 corvus_discovery.py --source ats >> /opt/corvus/logs/discovery_ats.log 2>&1
+
+# Direct platform pages: every 6 hours
+0 */6 * * *  cd /opt/corvus && python3 corvus_discovery.py --source pages >> /opt/corvus/logs/discovery_pages.log 2>&1
+
+# ── Claude Code intelligence layer (gate + analysis) ─────────────────────────
+
+# Gate raw_discoveries: every 20 minutes
+*/20 * * * *  claude --print --no-confirmation -p /opt/corvus/prompts/skill_gate_discoveries.md >> /opt/corvus/logs/gate.log 2>&1
+
+# Schools: collect Scorecard every 6 hours
+0 */6 * * *  cd /opt/corvus && python3 school_scraper.py --source scorecard --limit 200 >> /opt/corvus/logs/schools_collect.log 2>&1
+
+# Schools: Serper supplementary every 8 hours
+0 */8 * * *  cd /opt/corvus && python3 school_scraper.py --source serper --limit 50 >> /opt/corvus/logs/schools_serper.log 2>&1
+
+# Schools: Claude Code analyzes raw_schools every 4 hours
+0 */4 * * *  claude --print --no-confirmation -p /opt/corvus/prompts/skill_analyze_schools.md >> /opt/corvus/logs/schools_gate.log 2>&1
+
+# ── System health ─────────────────────────────────────────────────────────────
+
+# VPS health sweep: every 30 minutes
+*/30 * * * *  /opt/corvus/scripts/run_sweep.sh >> /opt/corvus/logs/sweep.log 2>&1
+
+# Export webapp data: every 4 hours
+0 */4 * * *  cd /opt/corvus && python3 export_webapp_data.py >> /opt/corvus/logs/export.log 2>&1

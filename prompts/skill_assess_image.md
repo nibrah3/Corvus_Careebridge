@@ -39,3 +39,12 @@ If the image requires auth to access (won't download directly): screenshot with 
 `mcp__gemini__delete_file(file_name)` — cleanup.
 `mcp__vps__update_job_status(job_id, status="applied")`.
 `mcp__telegram__notify("✅ Image annotation complete: {job_title}")`.
+
+## On Error
+
+For Gemini/tunnel failures: see sops/sop_on_error_shared.md.
+
+**Image skill specific:**
+- Gemini upload fails → stop; never screenshot-substitute; report to Telegram
+- Confidence < 0.80 on result → gate automatically; do not auto-submit
+- Platform format unknown → gate with format question for operator
