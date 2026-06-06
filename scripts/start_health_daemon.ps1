@@ -21,7 +21,11 @@ foreach ($var in @("TELEGRAM_BOT_TOKEN", "TELEGRAM_ADMIN_CHAT_ID", "OPENROUTER_A
     if ($userVal) { [System.Environment]::SetEnvironmentVariable($var, $userVal) }
 }
 
-$py     = "C:\Python314\python.exe"
+$py     = "C:\Python314\pythonw.exe"   # no console window
 $script = "$PSScriptRoot\health_daemon.py"
+
+# Ensure logs dir exists before daemon starts (daemon writes logs/health.log)
+$logsDir = Join-Path (Split-Path $PSScriptRoot -Parent) "logs"
+if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
 
 & $py $script

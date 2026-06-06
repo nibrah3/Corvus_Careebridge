@@ -25,7 +25,7 @@ summary at the end via mcp__telegram__notify. Do not ask questions or wait for i
 | 8714 | schools_mcp    |
 
 Check (PowerShell): `Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue`
-Auto-fix if any are missing: `powershell -NonInteractive -File D:\cb-core\scripts\start_mcps.ps1 -Force`
+Auto-fix if any are missing: `powershell -NonInteractive -File E:\Corvus_Careebridge\scripts\start_mcps.ps1 -Force`
 
 ---
 
@@ -96,8 +96,8 @@ Alert conditions:
 ## 6. Log File Errors — check last 30 minutes
 
 Scan last 100 lines of each file for ERROR or CRITICAL:
-- `D:\cb-core\logs\school_cron.log`
-- `D:\cb-core\logs\sweep.log`
+- `E:\Corvus_Careebridge\logs\school_cron.log`
+- `E:\Corvus_Careebridge\logs\sweep.log`
 
 Alert Telegram if any ERROR/CRITICAL found in the last 30 minutes.
 

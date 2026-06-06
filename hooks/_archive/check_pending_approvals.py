@@ -88,7 +88,7 @@ def main() -> None:
             f"Call mcp__vps__get_pending_approvals then present each via AskUserQuestion "
             f"with options [Apply] [Skip] [More Info]. "
             f"If IXBrowser is not running add [Launch IXBrowser] option — "
-            f"run `python D:\\cb-core\\scripts\\check_ixbrowser.py --launch`."
+            f"run `python E:\\Corvus_Careebridge\\scripts\\check_ixbrowser.py --launch`."
         )
 
     # ── 2. Assessment human gates ──────────────────────────────────────────────
@@ -110,7 +110,7 @@ def main() -> None:
             f"{detail_str}\n"
             f"For each gate: present the draft answer via AskUserQuestion with options "
             f"[✅ Approve] [✏️ Edit] [⏭ Skip]. "
-            f"Then call: python D:\\cb-core\\hooks\\answer_gate.py <gate_id> approve|edit|skip [answer]"
+            f"Then call: python E:\\Corvus_Careebridge\\hooks\\answer_gate.py <gate_id> approve|edit|skip [answer]"
         )
 
     # ── 3. Assessment timer ───────────────────────────────────────────────────

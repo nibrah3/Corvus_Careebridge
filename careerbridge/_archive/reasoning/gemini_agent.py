@@ -21,7 +21,7 @@ import numpy as np
 _MODEL    = "google/gemini-2.5-flash"
 _BASE_URL = "https://openrouter.ai/api/v1"
 
-# Ensure D:\cb-core is importable for answer_mcp sub-packages
+# Ensure E:\Corvus_Careebridge is importable for answer_mcp sub-packages
 _CB_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _CB_ROOT not in sys.path:
     sys.path.insert(0, _CB_ROOT)

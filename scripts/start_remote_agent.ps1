@@ -3,7 +3,7 @@
 # After this script is running, the primary machine's Claude Code session has full control.
 
 $ErrorActionPreference = "Stop"
-$cb  = "D:\cb-core"
+$cb  = "E:\Corvus_Careebridge"
 $vps = "root@77.42.91.185"
 $port = 7071
 $keyPath = "$env:USERPROFILE\.ssh\cb_remote_agent"

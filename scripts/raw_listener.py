@@ -4,7 +4,7 @@ immediately when VPS Crawlee signals new raw discoveries.
 
 The VPS discover_and_queue.py publishes to 'corvus:raw_ready' after each
 discovery run. This listener receives that signal and launches:
-    claude --print -p @D:\cb-core\prompts\skill_gate_discoveries.md
+    claude --print -p @E:\Corvus_Careebridge\prompts\skill_gate_discoveries.md
 
 Also polls 'corvus:raw_ready_queue' (a Redis list) as a fallback in case
 the pub/sub message was missed (e.g. listener was restarted).

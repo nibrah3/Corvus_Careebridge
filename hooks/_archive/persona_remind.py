@@ -1,7 +1,7 @@
 """
 persona_remind.py — UserPromptSubmit hook.
 Injects the Corvus customer care persona on every turn.
-Full reference: D:\cb-core\prompts\corvus_system_prompt.md
+Full reference: E:\Corvus_Careebridge\prompts\corvus_system_prompt.md
 """
 import json
 import sys

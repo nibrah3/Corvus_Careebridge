@@ -2,8 +2,8 @@
 # Invoked by \CareerBridge_Sweep Windows Task Scheduler task.
 
 $ErrorActionPreference = "SilentlyContinue"
-$logFile    = "D:\cb-core\logs\sweep.log"
-$promptFile = "D:\cb-core\scripts\SWEEP.md"
+$logFile    = "E:\Corvus_Careebridge\logs\sweep.log"
+$promptFile = "E:\Corvus_Careebridge\scripts\SWEEP.md"
 $claudeCmd  = "C:\Users\HP\AppData\Roaming\npm\claude.cmd"
 
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

@@ -62,23 +62,65 @@ _SYSTEM_PROMPT = (
 
 
 def _call_claude(text: str) -> dict | None:
-    """Call Claude for school criteria analysis. Prefers Anthropic SDK, falls back to OpenRouter."""
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    or_key        = os.environ.get("OPENROUTER_API_KEY", "")
+    """
+    Route school criteria analysis through Claude Code CLI (claude --print).
+    This uses the Claude Code subscription — no separate API credits needed.
+    Anthropic/OpenRouter SDK paths are kept as emergency fallbacks only.
+    """
+    import subprocess, tempfile, os as _os
+
+    prompt = (
+        _SYSTEM_PROMPT
+        + "\n\nSchool website text:\n\n"
+        + text[:6000]
+    )
+
+    # ── Primary: Claude Code CLI ──────────────────────────────────────────────
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(prompt)
+            tmp = f.name
+
+        result = subprocess.run(
+            ["claude", "--print", "--no-confirmation", "-p", tmp],
+            capture_output=True, text=True, timeout=120,
+        )
+        _os.unlink(tmp)
+
+        if result.returncode == 0 and result.stdout.strip():
+            raw = result.stdout.strip()
+            # strip markdown fences if present
+            if "```" in raw:
+                raw = "\n".join(raw.splitlines()[1:])
+                raw = raw[: raw.rfind("```")] if "```" in raw else raw
+            return json.loads(raw.strip())
+        if result.stderr:
+            log.debug("claude --print stderr: %s", result.stderr[:200])
+    except FileNotFoundError:
+        log.warning("claude CLI not found in PATH — falling back to SDK")
+    except Exception as e:
+        log.warning("claude --print failed: %s", e)
+        try:
+            _os.unlink(tmp)
+        except Exception:
+            pass
+
+    # ── Fallback: Anthropic SDK (if API credits available) ────────────────────
+    anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
+    or_key        = _os.environ.get("OPENROUTER_API_KEY", "")
 
     if not anthropic_key and not or_key:
-        log.warning("No LLM API key set — falling back to heuristics")
-        return None
+        return None   # caller will use heuristics
 
     user_content = f"School website text:\n\n{text[:6000]}"
-
     try:
         if anthropic_key:
             import anthropic
             client = anthropic.Anthropic(api_key=anthropic_key)
             resp = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=900,
+                model="claude-sonnet-4-6", max_tokens=900,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_content}],
             )
@@ -87,22 +129,18 @@ def _call_claude(text: str) -> dict | None:
             from openai import OpenAI
             client = OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
             resp = client.chat.completions.create(
-                model="anthropic/claude-sonnet-4-6",
-                max_tokens=900,
-                temperature=0,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_content},
-                ],
+                model="anthropic/claude-sonnet-4-6", max_tokens=900, temperature=0,
+                messages=[{"role": "system", "content": _SYSTEM_PROMPT},
+                           {"role": "user",   "content": user_content}],
             )
             raw = (resp.choices[0].message.content or "").strip()
 
         if raw.startswith("```"):
             raw = "\n".join(raw.splitlines()[1:])
-            raw = raw[:raw.rfind("```")] if "```" in raw else raw
+            raw = raw[: raw.rfind("```")] if "```" in raw else raw
         return json.loads(raw.strip())
     except Exception as e:
-        log.warning("Claude analysis failed: %s", e)
+        log.warning("SDK fallback failed: %s", e)
         return None
 
 
@@ -228,7 +266,8 @@ def analyze(school: dict) -> dict:
     result = _call_claude(text)
 
     if not result:
-        log.info("%s: Claude unavailable — heuristics", name[:40])
+        # Claude Code CLI unavailable and SDK credits exhausted — heuristics only
+        log.info("%s: heuristics (Claude Code unavailable)", name[:40])
         result = heuristic_analyze(text)
     else:
         # Trust the College Scorecard community_college flag over LLM

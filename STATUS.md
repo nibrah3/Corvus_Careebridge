@@ -1,4 +1,4 @@
-﻿# Corvus_Careebridge — Project Status & Blockers
+# Corvus_Careebridge — Project Status & Blockers
 
 *Last updated: 2026-05-21*
 
@@ -10,7 +10,7 @@
 |---|---|
 | Machine | DESKTOP-5OP0RFK |
 | User | HP |
-| Clone path | `D:\cb-core` |
+| Clone path | `E:\Corvus_Careebridge` |
 | Python | 3.14.0 at `C:\Python314\python.exe` |
 | OS | Windows 11 Pro 10.0.26200 |
 
@@ -38,20 +38,20 @@ All 9 MCP HTTP servers are running:
 
 To start all servers manually:
 ```powershell
-powershell -File D:\cb-core\scripts\start_mcps.ps1
+powershell -File E:\Corvus_Careebridge\scripts\start_mcps.ps1
 ```
 
 To register as a Windows startup task (run once as admin):
 ```powershell
-powershell -File D:\cb-core\scripts\register_startup.ps1
+powershell -File E:\Corvus_Careebridge\scripts\register_startup.ps1
 ```
 
 ---
 
 ## Setup Steps Completed (2026-05-21)
 
-1. **Cloned repo** to `D:\cb-core` (E: drive is CD-ROM, not writable)
-2. **Patched all `D:\cb-core` path references** → `D:\cb-core` across 11 files
+1. **Cloned repo** to `E:\Corvus_Careebridge` (E: drive is CD-ROM, not writable)
+2. **Patched all `E:\Corvus_Careebridge` path references** → `E:\Corvus_Careebridge` across 11 files
 3. **Installed Python 3.14.0** to `C:\Python314`
 4. **Tightened Python directory permissions** (`C:\Python314`):
    - Removed `NT AUTHORITY\Authenticated Users: Modify` (security risk)
@@ -98,15 +98,15 @@ powershell -File D:\cb-core\scripts\register_startup.ps1
   - `OPENROUTER_API_KEY` — Claude/OpenRouter calls for answer generation
   - `GEMINI_API_KEY` — Gemini video/image analysis (Phase 2)
   - `TELEGRAM_ADMIN_CHAT_ID` — Telegram notification target
-  - `CB_DB_PATH` — defaults to `D:\cb-core\careerbridge.db` (OK)
-  - `CB_MEMORY_PATH` — defaults to `D:\cb-core\memory_store.json` (OK)
+  - `CB_DB_PATH` — defaults to `E:\Corvus_Careebridge\careerbridge.db` (OK)
+  - `CB_MEMORY_PATH` — defaults to `E:\Corvus_Careebridge\memory_store.json` (OK)
 - System will silently fail or error at first tool call without these
-- **Fix**: Create `D:\cb-core\.env` or set via System Properties → Environment Variables
+- **Fix**: Create `E:\Corvus_Careebridge\.env` or set via System Properties → Environment Variables
 
 **3. Task Scheduler startup not registered**
 - `register_startup.ps1` has not been run on this machine
 - MCPs do not auto-start at login yet
-- **Fix**: Run `powershell -File D:\cb-core\scripts\register_startup.ps1` as Administrator once
+- **Fix**: Run `powershell -File E:\Corvus_Careebridge\scripts\register_startup.ps1` as Administrator once
 
 ### High Priority
 
@@ -130,12 +130,12 @@ powershell -File D:\cb-core\scripts\register_startup.ps1
 **7. Hard-coded `E:\careerbridge\runtime\.env` path**
 - `careerbridge/run_gemini_assessment.py` line 22 still references `E:\careerbridge\runtime\.env` as a fallback for `OPENROUTER_API_KEY`
 - This path does not exist on this machine
-- **Fix**: Update to `D:\cb-core\.env` or use `python-dotenv` with a configurable path
+- **Fix**: Update to `E:\Corvus_Careebridge\.env` or use `python-dotenv` with a configurable path
 
 **8. Persona profiles directory missing**
-- `answer_mcp` expects profiles at `D:\cb-core\profiles\{profile_id}.json`
+- `answer_mcp` expects profiles at `E:\Corvus_Careebridge\profiles\{profile_id}.json`
 - Directory does not exist yet
-- **Fix**: `mkdir D:\cb-core\profiles`
+- **Fix**: `mkdir E:\Corvus_Careebridge\profiles`
 
 **9. Memory store grows unbounded**
 - `memory_store.json` has no pruning, rotation, or size cap
@@ -152,7 +152,7 @@ powershell -File D:\cb-core\scripts\register_startup.ps1
 ## Immediate Next Steps (in order)
 
 1. Set environment variables (`OPENROUTER_API_KEY`, `TELEGRAM_ADMIN_CHAT_ID`)
-2. Create `D:\cb-core\profiles\` directory
+2. Create `E:\Corvus_Careebridge\profiles\` directory
 3. Run `register_startup.ps1` as admin to enable boot autostart
 4. Fix Claude reasoner model: Haiku → Sonnet in `claude_reasoner.py`
 5. Install remaining pip dependencies and generate `requirements.txt`
@@ -166,4 +166,4 @@ powershell -File D:\cb-core\scripts\register_startup.ps1
 - All 9 MCP servers start and respond correctly
 - Python 3.14.0 installed and accessible at `C:\Python314\python.exe`
 - `start_mcps.ps1` correctly detects already-running servers and skips them
-- Path references fully migrated from `D:\cb-core` → `D:\cb-core`
+- Path references fully migrated from `E:\Corvus_Careebridge` → `E:\Corvus_Careebridge`

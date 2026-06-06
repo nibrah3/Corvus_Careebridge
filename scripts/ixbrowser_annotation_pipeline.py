@@ -4,10 +4,10 @@ Connects to an open ixBrowser profile via CDP, navigates to a public annotation 
 uses Gemini to generate bounding-box annotations, then draws them via Playwright.
 """
 import sys, os, json, time, base64, io, math
-sys.path.insert(0, "D:/cb-core/scripts")
+sys.path.insert(0, "E:/Corvus_Careebridge/scripts")
 
 # Load .env (always wins over Windows env vars)
-for line in open("D:/cb-core/.env").read().splitlines():
+for line in open("E:/Corvus_Careebridge/.env").read().splitlines():
     if "=" in line and not line.startswith("#"):
         k, _, v = line.partition("=")
         os.environ[k.strip()] = v.strip()

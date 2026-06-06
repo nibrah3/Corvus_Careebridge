@@ -12,7 +12,7 @@
 #   5. Restart the tunnel using the new key
 #
 # Usage:
-#   powershell -File D:\cb-core\scripts\rotate_ssh_key.ps1
+#   powershell -File E:\Corvus_Careebridge\scripts\rotate_ssh_key.ps1
 
 $keyPath    = "$env:USERPROFILE\.ssh\id_careerbridge"
 $keyPubPath = "$keyPath.pub"

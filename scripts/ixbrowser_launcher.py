@@ -113,7 +113,7 @@ def _launch_ixbrowser_exe(wait_s: int = 20) -> bool:
     exe = _find_ixbrowser_exe()
     if not exe:
         raise RuntimeError(
-            "IXBrowser.exe not found. Set IXBROWSER_EXE_PATH in D:\\cb-core\\.env "
+            "IXBrowser.exe not found. Set IXBROWSER_EXE_PATH in E:\\Corvus_Careebridge\\.env "
             "or install IXBrowser."
         )
 

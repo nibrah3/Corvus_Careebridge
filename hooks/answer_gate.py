@@ -2,9 +2,9 @@
 answer_gate.py — Claude Code calls this to respond to an assessment gate.
 
 Usage:
-    python D:\\cb-core\\hooks\\answer_gate.py <gate_id> approve
-    python D:\\cb-core\\hooks\\answer_gate.py <gate_id> skip
-    python D:\\cb-core\\hooks\\answer_gate.py <gate_id> edit "My edited answer text"
+    python E:\\Corvus_Careebridge\\hooks\\answer_gate.py <gate_id> approve
+    python E:\\Corvus_Careebridge\\hooks\\answer_gate.py <gate_id> skip
+    python E:\\Corvus_Careebridge\\hooks\\answer_gate.py <gate_id> edit "My edited answer text"
 
 The assessment_pipeline.py subprocess is blocking on corvus:gate_response:{gate_id}.
 This script writes the answer there, unblocking the pipeline.

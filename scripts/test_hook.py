@@ -2,7 +2,7 @@
 import subprocess, json, sys
 
 HOOK = r"C:\Python314\python.exe"
-HOOK_SCRIPT = r"D:\cb-core\hooks\hook_block_js_clicks.py"
+HOOK_SCRIPT = r"E:\Corvus_Careebridge\hooks\hook_block_js_clicks.py"
 
 cases = [
     # Should BLOCK

@@ -58,7 +58,7 @@ def main():
         "This usually takes a few minutes.\"\n\n"
         "IMPORTANT - immediately after telling the user, run this Bash command "
         "(non-blocking background process):\n"
-        "  C:\\Python314\\python.exe D:\\cb-core\\scripts\\enrich_jobs.py\n\n"
+        "  C:\\Python314\\python.exe E:\\Corvus_Careebridge\\scripts\\enrich_jobs.py\n\n"
         "This enriches each discovered job with the employer's official URL, "
         "scrapes the authoritative job description, and broadcasts a PDF report "
         "to all registered users when complete.\n\n"

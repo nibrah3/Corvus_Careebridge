@@ -53,14 +53,14 @@ IXBrowser (paid) ──► API port 53200 ──► ws://127.0.0.1:PORT/devtools
 ### 2.1 Python environment
 
 ```powershell
-cd D:\cb-core
+cd E:\Corvus_Careebridge
 py -3 -m pip install -r requirements.txt
 py -3 -m pip install litellm websocket-client openai
 ```
 
 ### 2.2 .env file
 
-Create `D:\cb-core\.env` with:
+Create `E:\Corvus_Careebridge\.env` with:
 
 ```env
 # OpenRouter
@@ -124,7 +124,7 @@ Run these in order every day before any campaign:
 ### Full suite (all 8 tests)
 
 ```powershell
-cd D:\cb-core
+cd E:\Corvus_Careebridge
 py -3 scripts/test_e2e.py
 ```
 

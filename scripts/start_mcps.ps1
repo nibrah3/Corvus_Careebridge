@@ -3,7 +3,7 @@
 # Pass -Force to kill and restart any server already on its port.
 param([switch]$Force)
 
-$py  = "C:\Python314\python.exe"
+$py  = "C:\Python314\pythonw.exe"   # no console window on start
 $cb  = Split-Path $PSScriptRoot -Parent
 
 $servers = @(

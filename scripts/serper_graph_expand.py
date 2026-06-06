@@ -1,4 +1,4 @@
-﻿"""
+"""
 serper_graph_expand.py — Expand ATS probe coverage via Serper.
 
 Reads distinct company names from VPS postgres (jobs table), searches Serper
@@ -9,9 +9,9 @@ Tracks already-explored companies in postgres (probe_log table) to avoid
 duplicate Serper spend.
 
 Requirements:
-  - VPS SSH tunnels active: run powershell D:\\cb-core\\scripts\\vps_tunnel.ps1
+  - VPS SSH tunnels active: run powershell E:\\Corvus_Careebridge\\scripts\\vps_tunnel.ps1
     (Redis:6380, Postgres:5433, Crawlee:3101)
-  - D:\\cb-core\\.env with SERPER_API_KEY
+  - E:\\Corvus_Careebridge\\.env with SERPER_API_KEY
 
 Usage:
   python scripts/serper_graph_expand.py [--limit 50] [--dry-run]
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     if not SERPER_KEY:
-        log.error("SERPER_API_KEY not set. Add it to D:\\cb-core\\.env")
+        log.error("SERPER_API_KEY not set. Add it to E:\\Corvus_Careebridge\\.env")
         sys.exit(1)
 
     run(limit=args.limit, dry_run=args.dry_run)

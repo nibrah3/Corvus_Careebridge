@@ -280,7 +280,7 @@ def _gate_llm_call(user_msg: str) -> str:
         return (resp.choices[0].message.content or "").strip()
 
     raise RuntimeError(
-        "No LLM API key available. Set ANTHROPIC_API_KEY in D:\\cb-core\\.env"
+        "No LLM API key available. Set ANTHROPIC_API_KEY in E:\\Corvus_Careebridge\\.env"
     )
 
 

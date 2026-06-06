@@ -32,7 +32,7 @@ from pathlib import Path
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CB_DIR  = Path(os.environ.get("CB_DIR", Path(__file__).resolve().parent.parent))
-PYTHON  = Path(os.environ.get("CB_PYTHON", "C:/Python314/python.exe"))
+PYTHON  = Path(os.environ.get("CB_PYTHON", "C:/Python314/pythonw.exe"))
 LOG     = CB_DIR / "logs" / "health.log"
 DB      = CB_DIR / "careerbridge.db"
 
@@ -235,6 +235,7 @@ def _kill_zombie_ssh() -> int:
         r = subprocess.run(
             ["taskkill", "/F", "/IM", "ssh.exe"],
             capture_output=True, text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         killed = r.stdout.count("SUCCESS")
         if killed:
@@ -371,6 +372,7 @@ def _vps_check() -> dict:
         r = subprocess.run(
             args, capture_output=True, text=True,
             timeout=VPS_SSH_TIMEOUT + 5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         if r.returncode != 0:
             return {"reachable": False, "unhealthy": [], "missing": [], "error": r.stderr.strip()[:200]}

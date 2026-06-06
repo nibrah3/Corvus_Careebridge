@@ -76,7 +76,7 @@ def _tg_notify(text: str) -> None:
 
 
 def _read_defaults() -> dict:
-    """Read D:\\cb-core\\.defaults.json; return {} on any error."""
+    """Read E:\\Corvus_Careebridge\\.defaults.json; return {} on any error."""
     try:
         p = CB_DIR / ".defaults.json"
         return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}

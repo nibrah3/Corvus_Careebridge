@@ -348,6 +348,36 @@ def push_raw_discovery(url: str, title: str = "", company: str = "",
     return {"ok": True, "new": bool(row)}
 
 
+@mcp.tool()
+def get_raw_discoveries(limit: int = 25, blocked: bool = False) -> dict:
+    """Return unprocessed raw discoveries for Claude Code to enrich and classify."""
+    _ensure_raw_discoveries()
+    with _conn() as conn:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id, url, title, company, raw_content, source, discovered_at
+            FROM raw_discoveries
+            WHERE processed = FALSE AND blocked = %s
+            ORDER BY discovered_at ASC
+            LIMIT %s
+        """, (blocked, limit))
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            if hasattr(r.get('discovered_at'), 'isoformat'):
+                r['discovered_at'] = r['discovered_at'].isoformat()
+    return {"discoveries": rows, "count": len(rows)}
+
+
+@mcp.tool()
+def mark_discovery_processed(discovery_id: int, job_id: int = 0) -> dict:
+    """Mark a raw discovery as processed after Claude Code has analyzed it."""
+    _ensure_raw_discoveries()
+    with _conn() as conn:
+        conn.cursor().execute(
+            "UPDATE raw_discoveries SET processed=TRUE WHERE id=%s", (discovery_id,))
+    return {"ok": True, "id": discovery_id, "job_id": job_id or None}
+
+
 # ── Raw schools staging ────────────────────────────────────────────────────────
 
 def _ensure_raw_schools() -> None:

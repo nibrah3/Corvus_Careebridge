@@ -1,10 +1,10 @@
 # register_tunnel_task.ps1 — Register ONLY the CareerBridge-Tunnel scheduled task.
 # Run ONCE as Administrator:
 #   Right-click PowerShell -> "Run as Administrator"
-#   powershell -File D:\cb-core\scripts\register_tunnel_task.ps1
+#   powershell -File E:\Corvus_Careebridge\scripts\register_tunnel_task.ps1
 
 $tunnelName   = "CareerBridge-Tunnel"
-$tunnelScript = "D:\cb-core\scripts\vps_tunnel.ps1"
+$tunnelScript = "E:\Corvus_Careebridge\scripts\vps_tunnel.ps1"
 $pwshExe      = "powershell.exe"
 
 Unregister-ScheduledTask -TaskName $tunnelName -Confirm:$false -ErrorAction SilentlyContinue

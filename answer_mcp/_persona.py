@@ -13,7 +13,7 @@ Design:
   The same profile always writes the same way.
 
 Storage:
-  D:\\cb-core\\profiles\\{profile_id}.json
+  E:\\Corvus_Careebridge\\profiles\\{profile_id}.json
   {
     "profile_id": "...",
     "facts": { "age": 31, "background": "...", "industry": "..." },

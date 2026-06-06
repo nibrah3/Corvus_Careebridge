@@ -1,6 +1,6 @@
 """
 Export CareerBridge DB data to static JSON files for GitHub Pages.
-Run on VPS via cron or on-demand. Writes to D:/cb-core/webapp/data/*.json
+Run on VPS via cron or on-demand. Writes to E:/Corvus_Careebridge/webapp/data/*.json
 """
 import os, sys, json, logging
 from datetime import datetime, date

@@ -1,5 +1,5 @@
 import os, json, requests
-for line in open("D:/cb-core/.env").read().splitlines():
+for line in open("E:/Corvus_Careebridge/.env").read().splitlines():
     if "=" in line and not line.startswith("#"):
         k, _, v = line.partition("="); os.environ[k.strip()] = v.strip()
 

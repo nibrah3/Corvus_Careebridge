@@ -7,7 +7,7 @@ Usage (from Python):
     print(result["stdout"])
 
 Usage (CLI):
-    python -m scripts.remote_exec "Get-ChildItem D:\\cb-core"
+    python -m scripts.remote_exec "Get-ChildItem E:\\Corvus_Careebridge"
     python -m scripts.remote_exec "import sys; print(sys.version)" --shell python
 
 Requires:

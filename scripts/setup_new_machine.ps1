@@ -2,7 +2,7 @@
 # Run as Administrator from any PowerShell prompt.
 #
 # What this does:
-#   1. Detects clone path (D:\cb-core or prompts)
+#   1. Detects clone path (E:\Corvus_Careebridge or prompts)
 #   2. Installs all pip dependencies
 #   3. Creates required directories (profiles/, logs/)
 #   4. Applies DB schema if careerbridge.db is missing

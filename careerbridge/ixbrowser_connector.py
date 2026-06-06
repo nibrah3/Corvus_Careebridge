@@ -101,7 +101,7 @@ def ensure_ixbrowser_running() -> None:
     if not exe:
         raise RuntimeError(
             "IXBrowser is not running and IXBrowser.exe could not be found. "
-            "Set IXBROWSER_EXE_PATH in D:\\cb-core\\.env or launch IXBrowser manually."
+            "Set IXBROWSER_EXE_PATH in E:\\Corvus_Careebridge\\.env or launch IXBrowser manually."
         )
 
     import subprocess as _sp

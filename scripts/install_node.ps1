@@ -51,7 +51,7 @@ Write-Host "[2/5] Installing Python dependencies..." -ForegroundColor Yellow
 
 # ── 3. Write .env ─────────────────────────────────────────────────────────────
 Write-Host "[3/5] Configuring .env..." -ForegroundColor Yellow
-Write-Host "      (Copy these values from the main desktop's D:\cb-core\.env)"
+Write-Host "      (Copy these values from the main desktop's E:\Corvus_Careebridge\.env)"
 Write-Host ""
 
 $TelegramToken  = Read-Host "  Telegram bot token"

@@ -1,16 +1,16 @@
-﻿"""
+"""
 Capture MCP — smoke test and benchmark for all 5 backends.
 
 Runs N captures per backend, measures timing, validates output,
 saves one sample PNG per backend, prints comparison table.
 """
 import sys, time, io, os, traceback
-sys.path.insert(0, 'D:/cb-core')
+sys.path.insert(0, 'E:/Corvus_Careebridge')
 
 from PIL import Image
 
 N_RUNS   = 8          # captures per backend for timing
-OUT_DIR  = "D:/cb-core/capture_mcp/samples"
+OUT_DIR  = "E:/Corvus_Careebridge/capture_mcp/samples"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ── Backend registry ──────────────────────────────────────────────────────────

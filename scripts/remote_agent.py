@@ -13,7 +13,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 AUTH_TOKEN = "cb-remote-2026-xk9"
-CB_DIR     = r"D:\cb-core"
+CB_DIR     = r"E:\Corvus_Careebridge"
 PYTHON     = r"C:\Python314\python.exe"
 PORT       = 7071
 

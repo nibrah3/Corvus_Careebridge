@@ -56,11 +56,11 @@ def main():
         f"    - label: \"Edit\"     description: \"I'll provide a different answer\"\n"
         f"    - label: \"Skip\"     description: \"Leave this field blank and continue\"\n\n"
         f"After the user decides:\n"
-        f"  Approve -> run: C:\\Python314\\python.exe D:\\cb-core\\hooks\\answer_gate.py "
+        f"  Approve -> run: C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\answer_gate.py "
         f"{gate_id} approve\n"
         f"  Edit    -> ask user for the text, then run: "
-        f"C:\\Python314\\python.exe D:\\cb-core\\hooks\\answer_gate.py {gate_id} edit <text>\n"
-        f"  Skip    -> run: C:\\Python314\\python.exe D:\\cb-core\\hooks\\answer_gate.py "
+        f"C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\answer_gate.py {gate_id} edit <text>\n"
+        f"  Skip    -> run: C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\answer_gate.py "
         f"{gate_id} skip\n"
     )
 

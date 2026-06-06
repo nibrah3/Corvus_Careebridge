@@ -1,4 +1,4 @@
-﻿"""
+"""
 queue_bridge.py - Desktop application dispatcher.
 
 Polls corvus:approved_jobs Redis queue. For each job:
@@ -12,7 +12,7 @@ Requirements:
   - IXBrowser must be running and have profiles named to match postgres profile IDs
   - VPS SSH tunnels active (Redis:6380, Postgres:5433) -- run vps_tunnel.ps1
   - vps_mcp running on localhost:8713 -- run start_mcps.ps1
-  - D:\\cb-core\\.env must contain OPENROUTER_API_KEY
+  - E:\\Corvus_Careebridge\\.env must contain OPENROUTER_API_KEY
 
 Usage:
   python scripts/queue_bridge.py [--once]
@@ -196,7 +196,7 @@ def ix_find_profile(postgres_profile_id: str) -> int:
     raise RuntimeError(
         f"No IXBrowser profile found for '{postgres_profile_id}'. "
         f"Create an IXBrowser profile named '{postgres_profile_id}' "
-        f"or add a mapping to D:\\cb-core\\defaults.json under 'ixbrowser_profiles'."
+        f"or add a mapping to E:\\Corvus_Careebridge\\defaults.json under 'ixbrowser_profiles'."
     )
 
 
@@ -358,7 +358,7 @@ def list_ix_profiles():
         name = p.get("name", "?")
         print(f"  IXBrowser profile_id={pid!r}  name={name!r}")
     print(
-        "\nMap to postgres profile IDs in D:\\cb-core\\defaults.json:\n"
+        "\nMap to postgres profile IDs in E:\\Corvus_Careebridge\\defaults.json:\n"
         '  { "ixbrowser_profiles": { "james-okafor": "<ix-profile-id>" } }'
     )
 

@@ -9,14 +9,14 @@
 # SSH host config is in ~/.ssh/config (Host cb-vps).
 # Run once; loops to auto-reconnect on disconnect.
 
-$vps    = "cb-vps"    # resolved by ~/.ssh/config -> 77.42.91.185 via cb_tunnel key
-$sshKey = "$env:USERPROFILE\.ssh\cb_tunnel"
+$vps    = "vps"       # resolved by ~/.ssh/config -> 77.42.91.185
+$sshKey = "$env:USERPROFILE\.ssh\careerbridge_vps"
 
 $AlertAfterFailures = 3
 $ReconnectDelaySec  = 5
 
 # ── Load env for Telegram ──────────────────────────────────────────────────────
-foreach ($envFile in @("D:\cb-core\.env", "D:\cb-core\runtime\.env")) {
+foreach ($envFile in @("E:\Corvus_Careebridge\.env", "E:\Corvus_Careebridge\runtime\.env")) {
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
             if ($_ -match '^([^#=]+)=(.+)$') {
@@ -88,7 +88,7 @@ while ($true) {
         "-L", "3101:127.0.0.1:3100",
         "-L", "7788:127.0.0.1:7788",
         "-N",
-        "root@77.42.91.185"
+        "vps"
     )
 
     Write-Host "$(Get-Date -Format 'HH:mm:ss') Connecting..."

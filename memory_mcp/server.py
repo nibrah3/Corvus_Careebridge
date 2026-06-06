@@ -12,7 +12,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from _minmcp import MinMCP
 
-STORE_PATH = os.environ.get("CB_MEMORY_PATH", r"D:\cb-core\memory_store.json")
+STORE_PATH = os.environ.get("CB_MEMORY_PATH", r"E:\Corvus_Careebridge\memory_store.json")
 MAX_OBSERVATIONS_PER_ENTITY = 500   # keep the most recent N observations per entity
 MAX_RELATIONS = 2000                 # hard cap; oldest entries dropped when exceeded
 mcp = MinMCP("memory")

@@ -9,7 +9,7 @@ Covers all pipeline hooks:
   4. cv_generator        (persona in CV summary + cover letter)
 
 Usage:
-  python D:\\cb-core\\scripts\\test_persona_variation.py
+  python E:\\Corvus_Careebridge\\scripts\\test_persona_variation.py
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ import sys
 import hashlib
 import time
 
-sys.path.insert(0, r"D:\cb-core")
+sys.path.insert(0, r"E:\Corvus_Careebridge")
 
-for _ENV in (r"D:\cb-core\.env", r"D:\cb-core\runtime\.env"):
+for _ENV in (r"E:\Corvus_Careebridge\.env", r"E:\Corvus_Careebridge\runtime\.env"):
     if not os.getenv("OPENROUTER_API_KEY") and os.path.exists(_ENV):
         with open(_ENV) as f:
             for line in f:
@@ -224,7 +224,7 @@ def test_application_hook() -> None:
 def test_cv_hook() -> None:
     print("\n=== STEP 5: cv_generator hook (CV summary + cover letter) ===")
     import sys as _sys
-    _sys.path.insert(0, r"D:\cb-core")
+    _sys.path.insert(0, r"E:\Corvus_Careebridge")
     from cv_generator import generate_cv, generate_cover_letter, _humanize_cv_summary
 
     persona_a = get_persona_prompt(PROFILE_A)

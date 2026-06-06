@@ -5,11 +5,11 @@
 # The session is named "CareerBridge" — find it in the Claude app session list.
 # Connect from your phone: open the Claude app -> Sessions -> CareerBridge
 
-Set-Location "D:\cb-core"
+Set-Location "E:\Corvus_Careebridge"
 
 # Start MCP servers first (skips any already running)
 Write-Host "Starting MCP servers..."
-& "D:\cb-core\scripts\start_mcps.ps1"
+& "E:\Corvus_Careebridge\scripts\start_mcps.ps1"
 Start-Sleep -Seconds 3
 
 Write-Host ""

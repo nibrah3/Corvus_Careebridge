@@ -95,7 +95,7 @@ def main():
         "  question: \"[Name]\"\n"
         "  header:   \"Profile [N] of [total]\"\n"
         "  options:\n"
-        "    [Set as Active]        -> read D:\\cb-core\\.defaults.json, set 'candidate_profile_id'\n"
+        "    [Set as Active]        -> read E:\\Corvus_Careebridge\\.defaults.json, set 'candidate_profile_id'\n"
         "                             to this profile's id, write back. Say:\n"
         "                             \"Done! [Name] is now your active profile.\"\n"
         "                             Then show the My Setup sub-menu.\n"

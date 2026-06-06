@@ -1,7 +1,7 @@
 # register_all_tasks.ps1 — Register all CareerBridge scheduled tasks.
 # Run ONCE as Administrator.
 
-$root   = "D:\cb-core"
+$root   = "E:\Corvus_Careebridge"
 $pwsh   = "powershell.exe"
 $python = "C:\Python314\python.exe"
 $claude = "C:\Users\HP\AppData\Roaming\npm\claude.cmd"

@@ -1,7 +1,7 @@
 # Corvus_Careebridge — Comprehensive Engineering Report
 
 **Generated:** 2026-05-24  
-**Project root:** `D:\cb-core`  
+**Project root:** `E:\Corvus_Careebridge`  
 **GitHub:** github.com/nibrah3/Corvus_Careebridge  
 **GitHub Pages:** https://nibrah3.github.io/Corvus_Careebridge/  
 
@@ -10,7 +10,7 @@
 ## 1. ixBrowser Annotation Pipeline
 
 ### What was built
-`D:\cb-core\scripts\ixbrowser_annotation_pipeline.py`
+`E:\Corvus_Careebridge\scripts\ixbrowser_annotation_pipeline.py`
 
 An end-to-end computer-vision annotation pipeline using:
 - **ixBrowser local REST API** (port 53200) to open an existing anti-detect browser profile
@@ -60,7 +60,7 @@ ixBrowser API prefix is `/api/v2/` (not `/api/v1/browser/`). Discovered by grepp
 ## 2. Telegram Bot — Primary UI
 
 ### File
-`D:\cb-core\scripts\telegram_bot.py`
+`E:\Corvus_Careebridge\scripts\telegram_bot.py`
 
 ### Architecture
 
@@ -113,16 +113,16 @@ POLL_INTERVAL = 300s (5 min)
 
 ### Run
 ```bash
-py -3 D:\cb-core\scripts\telegram_bot.py
+py -3 E:\Corvus_Careebridge\scripts\telegram_bot.py
 ```
-Logs to `D:\cb-core\logs\telegram_bot.log`
+Logs to `E:\Corvus_Careebridge\logs\telegram_bot.log`
 
 ---
 
 ## 3. GitHub Pages Web App
 
 ### File
-`D:\cb-core\webapp\index.html`
+`E:\Corvus_Careebridge\webapp\index.html`
 
 ### Stack
 - Pure HTML/CSS/JS — no build step, no framework
@@ -148,7 +148,7 @@ Each school card shows:
 
 ### Deploy
 ```bash
-# In D:\cb-core, ensure webapp/data/*.json files exist, then:
+# In E:\Corvus_Careebridge, ensure webapp/data/*.json files exist, then:
 git add webapp/
 git commit -m "webapp: update"
 git push origin main
@@ -160,7 +160,7 @@ git push origin main
 ## 4. Static JSON Exporter
 
 ### File
-`D:\cb-core\scripts\export_webapp_data.py`
+`E:\Corvus_Careebridge\scripts\export_webapp_data.py`
 
 ### Exports
 | File | Query | Notes |
@@ -187,7 +187,7 @@ git push origin main
 ## 5. School Scraper
 
 ### File
-`D:\cb-core\scripts\school_scraper.py`
+`E:\Corvus_Careebridge\scripts\school_scraper.py`
 
 ### Filters searched
 | Filter key | What it finds |
@@ -244,13 +244,13 @@ Results sorted by `criteria_score` descending. Report tiers:
 ### Run
 ```bash
 # Full run (best_match queries execute first):
-py -3 D:\cb-core\scripts\school_scraper.py --filter all --report
+py -3 E:\Corvus_Careebridge\scripts\school_scraper.py --filter all --report
 
 # Single filter:
-py -3 D:\cb-core\scripts\school_scraper.py --filter monthly_enrollment
+py -3 E:\Corvus_Careebridge\scripts\school_scraper.py --filter monthly_enrollment
 
 # Custom query:
-py -3 D:\cb-core\scripts\school_scraper.py --custom "open enrollment online college Kenya" --report
+py -3 E:\Corvus_Careebridge\scripts\school_scraper.py --custom "open enrollment online college Kenya" --report
 ```
 
 ---
@@ -268,23 +268,23 @@ playwright install chromium
 
 1. **Create schools table** (one-time):
    ```bash
-   py -3 -c "import sys; sys.path.insert(0,'D:/cb-core/scripts'); \
+   py -3 -c "import sys; sys.path.insert(0,'E:/Corvus_Careebridge/scripts'); \
              import school_scraper; school_scraper.ensure_table()"
    ```
 
 2. **Run school scraper**:
    ```bash
-   py -3 D:\cb-core\scripts\school_scraper.py --filter all --report
+   py -3 E:\Corvus_Careebridge\scripts\school_scraper.py --filter all --report
    ```
 
 3. **Export static JSON**:
    ```bash
-   py -3 D:\cb-core\scripts\export_webapp_data.py
+   py -3 E:\Corvus_Careebridge\scripts\export_webapp_data.py
    ```
 
 4. **Push webapp to GitHub Pages**:
    ```bash
-   cd D:\cb-core
+   cd E:\Corvus_Careebridge
    git add webapp/
    git commit -m "webapp: initial deploy"
    git push origin main
@@ -293,7 +293,7 @@ playwright install chromium
 
 5. **Start Telegram bot**:
    ```bash
-   py -3 D:\cb-core\scripts\telegram_bot.py
+   py -3 E:\Corvus_Careebridge\scripts\telegram_bot.py
    ```
    Or register as a Windows scheduled task / VPS systemd service.
 
@@ -309,7 +309,7 @@ playwright install chromium
 
 ## 7. Environment Variables
 
-All read from `D:\cb-core\.env`:
+All read from `E:\Corvus_Careebridge\.env`:
 
 | Key | Used by |
 |-----|---------|

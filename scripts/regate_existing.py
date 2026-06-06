@@ -9,7 +9,7 @@ What this does:
   4. Kept: job_type populated, requirements stored in official_description if missing
   5. Prints a summary table of job_type distribution
 
-Run once from D:\\cb-core:
+Run once from E:\\Corvus_Careebridge:
   python scripts/regate_existing.py
   python scripts/regate_existing.py --dry-run   # preview without writing
   python scripts/regate_existing.py --limit 50  # process first N jobs
