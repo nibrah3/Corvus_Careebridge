@@ -17,3 +17,5 @@ profiles/*.json
 *.jsonl
 runtime/
 node_modules/
+.claude/settings.json
+logs/inbox.json
