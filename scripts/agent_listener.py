@@ -97,7 +97,19 @@ def on_message(payload: dict) -> None:
     log.info("MSG from %s (id=%s type=%s): %s", sender, msg_id, msg_type, text[:100])
 
     if msg_type in ("response", "status"):
-        log.info("RESPONSE from %s: %s", sender, text[:400])
+        log.info("RESPONSE from %s: %s", sender, text[:2000])
+        # Store full response in DB for retrieval
+        try:
+            import psycopg2
+            conn = psycopg2.connect(os.environ.get("VPS_PG_DSN",""), connect_timeout=5)
+            cur  = conn.cursor()
+            cur.execute(
+                "INSERT INTO machine_comms (sender, recipient, msg_type, payload) VALUES (%s,%s,%s,%s)",
+                (sender, ROLE, "RESPONSE", __import__("json").dumps({"text": text, "id": msg_id}))
+            )
+            conn.commit(); conn.close()
+        except Exception:
+            pass
         return
 
     response = run_claude(text)
