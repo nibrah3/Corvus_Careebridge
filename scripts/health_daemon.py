@@ -438,41 +438,34 @@ def run() -> None:
             time.sleep(STARTUP_GRACE)
 
         # ── VPS tunnel check (every TUNNEL_POLL_INTERVAL seconds) ─────────────
+        # NOTE: vps_tunnel.py owns the restart loop — health_daemon only monitors
+        # and alerts. Killing ssh.exe here caused double-restart flicker.
         if tunnel_state.due():
             tunnel_state.last_checked_at = time.monotonic()
             down_ports = _tunnel_ports_up()
 
             if not down_ports:
                 tunnel_state.reset()
-            elif tunnel_state.backoff_elapsed():
-                tunnel_state.restart_count  += 1
-                tunnel_state.last_restart_at = time.monotonic()
+            else:
                 down_labels = [TUNNEL_PORTS[p] for p in down_ports]
-                log.warning("Tunnel DOWN — ports %s — restart #%d",
-                            down_labels, tunnel_state.restart_count)
+                tunnel_state.restart_count += 1
+                tunnel_state.last_restart_at = time.monotonic()
+                log.warning("Tunnel DOWN — ports %s (vps_tunnel.py will reconnect)",
+                            down_labels)
 
-                ok = _restart_tunnel()
-
-                if ok:
+                if tunnel_state.restart_count == ALERT_AFTER:
                     _tg_send(
-                        f"[TUNNEL] SSH tunnel was down ({', '.join(down_labels)}). "
-                        f"Auto-restarted successfully (attempt #{tunnel_state.restart_count})."
+                        f"[TUNNEL] SSH tunnel has been down for {tunnel_state.restart_count} checks. "
+                        f"Down ports: {', '.join(down_labels)}. vps_tunnel.py is retrying."
                     )
-                    tunnel_state.reset()
-                else:
-                    if tunnel_state.restart_count <= ALERT_AFTER:
-                        _tg_send(
-                            f"[TUNNEL] SSH tunnel restart #{tunnel_state.restart_count} failed. "
-                            f"Down ports: {', '.join(down_labels)}. Will retry."
-                        )
-                    elif not tunnel_state.alerted:
-                        tunnel_state.alerted = True
-                        _db_write_issue("vps_ssh_tunnel", 6380, tunnel_state.restart_count)
-                        _tg_send(
-                            f"[TUNNEL] SSH tunnel has failed {tunnel_state.restart_count} times. "
-                            f"Possible auth issue (check SSH keys). "
-                            f"Logged to health_issues. Manual intervention may be needed."
-                        )
+                elif tunnel_state.restart_count > ALERT_AFTER and not tunnel_state.alerted:
+                    tunnel_state.alerted = True
+                    _db_write_issue("vps_ssh_tunnel", 6380, tunnel_state.restart_count)
+                    _tg_send(
+                        f"[TUNNEL] SSH tunnel has failed {tunnel_state.restart_count} checks. "
+                        f"Possible auth issue (check SSH keys). "
+                        f"Logged to health_issues. Manual intervention may be needed."
+                    )
 
         # ── VPS container health check (every VPS_CHECK_INTERVAL seconds) ──────
         if vps_state.due():
