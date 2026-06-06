@@ -41,13 +41,23 @@ ROLE = os.environ.get("CB_SYNC_ROLE", "primary")
 sys.path.insert(0, str(CB_DIR))
 from scripts.agent_comms import send, listen, write_heartbeat
 
+# Find claude executable — pythonw doesn't inherit shell PATH
+_CLAUDE_CANDIDATES = [
+    Path(os.environ.get("APPDATA","")) / "npm/claude.cmd",
+    Path(os.environ.get("APPDATA","")) / "npm/claude",
+    Path.home() / "AppData/Roaming/npm/claude.cmd",
+    Path("/usr/local/bin/claude"),
+]
+CLAUDE_EXE = next((str(p) for p in _CLAUDE_CANDIDATES if p.exists()), "claude")
+log.info("claude executable: %s", CLAUDE_EXE)
+
 
 def run_claude(instruction: str) -> str:
     """Pipe instruction into claude --print and return the response."""
     log.info("Invoking claude --print for: %s", instruction[:100])
     try:
         result = subprocess.run(
-            ["claude", "--print", "--dangerously-skip-permissions",
+            [CLAUDE_EXE, "--print", "--dangerously-skip-permissions",
              f"You are the CareerBridge agent on the {ROLE} machine at {CB_DIR}. "
              f"Another engineer sent this instruction:\n\n{instruction}\n\n"
              f"Execute it. Report what you did and any issues concisely."],

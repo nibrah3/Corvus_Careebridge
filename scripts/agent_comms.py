@@ -158,7 +158,7 @@ def listen(on_message):
     Deduplicates by message ID.
     Blocks forever — run in a thread.
     """
-    seen   = set()          # dedup set (last 500 IDs)
+    seen   = {}             # msg_id -> timestamp, dedup within 120s
     inbox  = queue.Queue()
 
     def _dispatch(raw: str) -> None:
@@ -171,11 +171,13 @@ def listen(on_message):
         if payload.get("from") == ROLE:
             return
         msg_id = payload.get("id", raw[:16])
-        if msg_id in seen:
-            return
-        seen.add(msg_id)
-        if len(seen) > 500:
-            seen.pop()
+        now = time.time()
+        if msg_id in seen and now - seen[msg_id] < 120:
+            return  # duplicate within 2 minutes, drop
+        seen[msg_id] = now
+        # Evict old entries
+        expired = [k for k, t in seen.items() if now - t > 120]
+        for k in expired: del seen[k]
         inbox.put(payload)
 
     def _redis_thread():
