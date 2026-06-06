@@ -1,0 +1,45 @@
+name: Schools Pipeline Status
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'    # every 6 hours — pipeline progress report
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Write SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Query pipeline status from VPS DB
+        id: status
+        run: |
+          STATUS=$(ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            root@${{ secrets.VPS_HOST }} \
+            'psql -U corvus -d careerbridge -t -c "
+              SELECT
+                (SELECT COUNT(*) FROM raw_schools) as total_crawled,
+                (SELECT COUNT(*) FROM raw_schools WHERE analyzed = TRUE) as analyzed,
+                (SELECT COUNT(*) FROM raw_schools WHERE analyzed = FALSE AND raw_text IS NOT NULL AND length(raw_text) > 50) as pending_analysis,
+                (SELECT COUNT(*) FROM schools WHERE criteria_score >= 1) as qualified,
+                (SELECT COUNT(*) FROM schools WHERE online_available = TRUE) as online_verified;
+            " 2>/dev/null')
+
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Send status report
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }},
+              \"text\": \"[SCHOOLS PIPELINE]\n${{ steps.status.outputs.status }}\"
+            }"

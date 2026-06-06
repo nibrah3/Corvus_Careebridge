@@ -1,0 +1,72 @@
+name: Cross-Machine Sync
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '*/30 * * * *'   # every 30 minutes — catches offline machines
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up git identity
+        run: |
+          git config user.name  "CareerBridge Sync Bot"
+          git config user.email "sync@careerbridge.local"
+
+      - name: Check for diverged branches
+        id: diverge
+        run: |
+          # Fetch all refs
+          git fetch --all
+
+          # Count commits ahead/behind between any feature branches
+          BRANCHES=$(git branch -r | grep -v HEAD | grep -v 'origin/master' | sed 's/origin\///')
+          DIVERGED=""
+          for branch in $BRANCHES; do
+            AHEAD=$(git rev-list --count origin/master..origin/$branch 2>/dev/null || echo 0)
+            BEHIND=$(git rev-list --count origin/$branch..origin/master 2>/dev/null || echo 0)
+            if [ "$AHEAD" -gt 0 ] || [ "$BEHIND" -gt 0 ]; then
+              DIVERGED+="Branch $branch: +$AHEAD/-$BEHIND vs master\n"
+            fi
+          done
+
+          if [ -n "$DIVERGED" ]; then
+            echo "diverged=true" >> $GITHUB_OUTPUT
+            echo "details=$DIVERGED" >> $GITHUB_OUTPUT
+          else
+            echo "diverged=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify diverged branches
+        if: steps.diverge.outputs.diverged == 'true'
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }},
+              \"text\": \"[SYNC] Branch divergence detected:\n${{ steps.diverge.outputs.details }}\nPull on both machines to sync.\"
+            }"
+
+      - name: Notify push event
+        if: github.event_name == 'push'
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          AUTHOR=$(git log -1 --pretty=%an)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }},
+              \"text\": \"[SYNC] New push to master\nBy: $AUTHOR\nCommit: $SHORT_SHA\nMsg: $COMMIT_MSG\n\nPull on secondary machine: git pull origin master\"
+            }"

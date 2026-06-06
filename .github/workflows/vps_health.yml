@@ -1,0 +1,85 @@
+name: VPS Health Check
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes
+  workflow_dispatch:           # manual trigger from GitHub UI
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Write SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Check VPS services
+        id: check
+        run: |
+          RESULT=$(ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            root@${{ secrets.VPS_HOST }} \
+            'bash -s' << '"ENDSSH"'
+            STATUS=""
+            FAILED=0
+
+            # PostgreSQL
+            if pg_isready -h 127.0.0.1 -p 5432 -U corvus -q 2>/dev/null; then
+              STATUS+="✅ PostgreSQL: UP\n"
+            else
+              STATUS+="❌ PostgreSQL: DOWN\n"; FAILED=1
+            fi
+
+            # Redis
+            if redis-cli -p 6379 ping 2>/dev/null | grep -q PONG; then
+              STATUS+="✅ Redis: UP\n"
+            else
+              STATUS+="❌ Redis: DOWN\n"; FAILED=1
+            fi
+
+            # Firecrawl (port 7788)
+            if curl -sf http://127.0.0.1:7788/health > /dev/null 2>&1 || \
+               nc -z 127.0.0.1 7788 2>/dev/null; then
+              STATUS+="✅ Firecrawl: UP\n"
+            else
+              STATUS+="❌ Firecrawl: DOWN\n"; FAILED=1
+            fi
+
+            # Crawlee (port 3100)
+            if nc -z 127.0.0.1 3100 2>/dev/null; then
+              STATUS+="✅ Crawlee: UP\n"
+            else
+              STATUS+="⚠️ Crawlee: DOWN (may be idle)\n"
+            fi
+
+            echo "FAILED=$FAILED"
+            echo "STATUS<<EOF"
+            echo -e "$STATUS"
+            echo "EOF"
+            ENDSSH
+          )
+          echo "$RESULT" >> $GITHUB_OUTPUT
+
+      - name: Alert on failure
+        if: contains(steps.check.outputs.STATUS, '❌')
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }},
+              \"text\": \"[VPS HEALTH] Service(s) DOWN\n${{ steps.check.outputs.STATUS }}\nCheck: https://github.com/${{ github.repository }}/actions\"
+            }"
+
+      - name: All clear notification (only after previous failure)
+        if: "!contains(steps.check.outputs.STATUS, '❌') && github.event_name == 'workflow_dispatch'"
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }},
+              \"text\": \"[VPS HEALTH] All services UP ✅\n${{ steps.check.outputs.STATUS }}\"
+            }"
