@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_inbox.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_inbox.py"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_block_js_clicks.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_block_js_clicks.py"
           }
         ]
       }
@@ -26,11 +26,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_menu_router.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_menu_router.py"
           },
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_gate_monitor.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_gate_monitor.py"
           }
         ]
       }
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_present_jobs.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_present_jobs.py"
           }
         ]
       },
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_system_status.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_system_status.py"
           }
         ]
       },
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_present_profiles.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_present_profiles.py"
           }
         ]
       },
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_profile_saved.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_profile_saved.py"
           }
         ]
       },
@@ -77,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_trigger_discovery.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_trigger_discovery.py"
           }
         ]
       },
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_present_schools.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_present_schools.py"
           }
         ]
       },
@@ -95,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_schools_notify.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_schools_notify.py"
           }
         ]
       }
@@ -106,7 +106,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_session_end.py"
+            "command": "C:\\Python314\\python.exe D:\\cb-core\\hooks\\hook_session_end.py"
           }
         ]
       }
