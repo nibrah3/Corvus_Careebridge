@@ -1,32 +1,28 @@
 #!/usr/bin/env python3
 """
-hook_menu_router.py — UserPromptSubmit hook (Module 1)
-Detects greetings and open-ended messages, injects Main Menu instruction.
-Never blocks — always exits 0.
+hook_menu_router.py — UserPromptSubmit hook.
+Detects greetings and open-ended messages, injects the Main Menu.
+Three options only: Apply | Queue | System.
 """
-import io
-import json
-import sys
-import re
+import io, json, re, sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-MENU_INSTRUCTION = """\
+MENU = """\
 [SYSTEM - MENU REQUIRED]
-The user sent a greeting or open-ended message. Your ONLY response must be \
-to call AskUserQuestion immediately with the Main Menu below. \
+The user sent a greeting or open-ended message.
+Your ONLY response must be to call AskUserQuestion immediately with this menu.
 Do not write any text before the AskUserQuestion call.
 
-question: "Welcome back! What would you like to do?"
-header: "Main Menu"
+question: "Welcome back. What do you want to do?"
+header: "CareerBridge"
 options:
-  - label: "Jobs & Assessments"  description: "Find and apply to job opportunities"
-  - label: "Schools"             description: "Find and enroll in online schools"
-  - label: "My Setup"            description: "Manage profiles, proxies, and your CV"
-  - label: "System"              description: "Start or check your CareerBridge systems"
+  - label: "Apply"   description: "Pick a job or school from your ready queue and apply"
+  - label: "Queue"   description: "See discovered jobs, applied history, school results"
+  - label: "System"  description: "Health check, browser setup, profiles, discovery settings"
 """
 
-GREETING_PATTERNS = [
+TRIGGERS = [
     r"^$",
     r"^(hi|hello|hey|yo|sup|howdy|greetings|hiya)\b",
     r"^good\s+(morning|afternoon|evening|night|day)\b",
@@ -34,20 +30,17 @@ GREETING_PATTERNS = [
     r"^(what can you do|what do you do|options|show options|show menu)\b",
 ]
 
-def is_menu_trigger(prompt: str) -> bool:
-    p = prompt.strip().lower()
-    return any(re.match(pat, p) for pat in GREETING_PATTERNS)
-
 def main():
     try:
-        raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace").strip()
+        raw  = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace").strip()
         data = json.loads(raw) if raw else {}
         prompt = data.get("prompt", "")
     except Exception:
         prompt = ""
 
-    if is_menu_trigger(prompt):
-        print(MENU_INSTRUCTION)
+    p = prompt.strip().lower()
+    if any(re.match(t, p) for t in TRIGGERS):
+        print(MENU)
 
     sys.exit(0)
 
