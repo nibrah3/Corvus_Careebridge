@@ -53,20 +53,35 @@ log.info("claude executable: %s", CLAUDE_EXE)
 
 
 def run_claude(instruction: str) -> str:
-    """Pipe instruction into claude --print and return the response."""
+    """Invoke claude --print with prompt via stdin to avoid Windows
+    cmd.exe mangling newlines/special chars in command-line arguments."""
     log.info("Invoking claude --print for: %s", instruction[:100])
+    prompt = (
+        f"You are the CareerBridge agent on the {ROLE} machine ({CB_DIR}). "
+        f"A peer engineer sent this instruction:\n\n{instruction}\n\n"
+        f"Execute it using your tools. Reply concisely with what you did and any issues."
+    )
     try:
         result = subprocess.run(
-            [CLAUDE_EXE, "--print", "--dangerously-skip-permissions",
-             f"You are the CareerBridge agent on the {ROLE} machine at {CB_DIR}. "
-             f"Another engineer sent this instruction:\n\n{instruction}\n\n"
-             f"Execute it. Report what you did and any issues concisely."],
+            [CLAUDE_EXE, "--print", "--dangerously-skip-permissions", "-"],
+            input=prompt,
             cwd=str(CB_DIR),
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=300,
         )
-        return result.stdout.strip() or f"[exit {result.returncode}] {result.stderr[:300]}"
+        out = result.stdout.strip()
+        if not out:
+            # Fallback: pass as direct arg (some versions don't support stdin via -)
+            result = subprocess.run(
+                [CLAUDE_EXE, "--print", "--dangerously-skip-permissions", prompt],
+                cwd=str(CB_DIR),
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=300,
+            )
+            out = result.stdout.strip()
+        return out or f"[exit {result.returncode}] {result.stderr[:300]}"
     except subprocess.TimeoutExpired:
         return "[TIMEOUT after 300s]"
     except Exception as e:
