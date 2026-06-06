@@ -14,7 +14,7 @@ Run silently:  pythonw scripts/agent_listener.py
 Run verbosely: python  scripts/agent_listener.py
 """
 from __future__ import annotations
-import json, logging, os, subprocess, sys, time
+import json, logging, os, subprocess, sys, threading, time
 from pathlib import Path
 
 CB_DIR = Path(__file__).resolve().parent.parent
@@ -104,8 +104,42 @@ def on_message(payload: dict) -> None:
     send(to=sender, msg=response, msg_type="response")
 
 
+def _watch_for_updates() -> None:
+    """Background thread — checks agent_listener.py and agent_comms.py mtimes
+    every 15s. If either file changes on disk (new git pull), re-execs the
+    process so the update takes effect without manual restart."""
+    watched = [
+        CB_DIR / "scripts" / "agent_listener.py",
+        CB_DIR / "scripts" / "agent_comms.py",
+    ]
+    mtimes = {p: p.stat().st_mtime for p in watched if p.exists()}
+
+    while True:
+        time.sleep(15)
+        for p in watched:
+            if not p.exists():
+                continue
+            try:
+                new_mtime = p.stat().st_mtime
+                if new_mtime != mtimes.get(p):
+                    log.info("Detected change in %s — restarting agent_listener...", p.name)
+                    time.sleep(2)  # let the write finish
+                    # Spawn fresh process then exit this one
+                    subprocess.Popen(
+                        [sys.executable, str(CB_DIR / "scripts" / "agent_listener.py")],
+                        cwd=str(CB_DIR),
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    )
+                    sys.exit(0)
+            except Exception as e:
+                log.debug("Watcher error for %s: %s", p.name, e)
+
+
 def main():
     log.info("agent_listener starting — role=%s", ROLE)
+
+    # Watch for file changes and auto-restart on update
+    threading.Thread(target=_watch_for_updates, daemon=True).start()
 
     # Announce online
     send("broadcast", f"{ROLE} agent online at {CB_DIR}", msg_type="status")
