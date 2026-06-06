@@ -96,7 +96,7 @@ def diff_and_instruct(primary: dict, secondary: dict) -> list[str]:
         sec_pyw = str(Path(secondary.get("python_exe", "C:\\Python314\\python.exe")).parent / "pythonw.exe")
         mcp_port_map = {"humanizer":8701,"capture":8702,"uia":8703,"browser":8704,
                         "gemini":8705,"telegram":8706,"answer":8707,"sqlite":8708,
-                        "memory":8709,"dom":8710,"cdp":8712,"vps":8713,"schools":8714,"ixbrowser":8715}
+                        "memory":8709,"dom":8710,"cdp":8712,"vps":8713,"schools":8714,}
         for svc in down_on_sec:
             port = mcp_port_map.get(svc, "?")
             instructions.append(
