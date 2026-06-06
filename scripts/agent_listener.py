@@ -1,25 +1,20 @@
 """
-agent_listener.py — Real-time inter-agent communication via VPS Redis pub/sub.
+agent_listener.py — Always-on agent listener. Runs on both machines.
 
-Each machine runs this. Messages arrive via Redis channel 'cb_agents'.
-When a message is addressed to this machine's role, it is piped into
-claude --print --dangerously-skip-permissions and the response is published back.
+Subscribes to all three communication tiers simultaneously via agent_comms.py:
+  Tier 1: Redis pub/sub  (fastest)
+  Tier 2: Postgres NOTIFY (fallback)
+  Tier 3: Telegram       (last-resort, human-visible)
 
-Channel message format (JSON):
-    {
-        "to":   "secondary" | "primary" | "broadcast",
-        "from": "primary"   | "secondary",
-        "id":   "<uuid>",
-        "type": "instruction" | "response" | "status",
-        "msg":  "<natural language instruction or response>"
-    }
+When an instruction arrives addressed to this machine, it pipes it into
+claude --print --dangerously-skip-permissions and publishes the response back
+on the best available tier.
 
-Run:
-    pythonw scripts/agent_listener.py     # silent background
-    python  scripts/agent_listener.py     # foreground with console output
+Run silently:  pythonw scripts/agent_listener.py
+Run verbosely: python  scripts/agent_listener.py
 """
 from __future__ import annotations
-import json, logging, os, subprocess, sys, time, uuid
+import json, logging, os, subprocess, sys, time
 from pathlib import Path
 
 CB_DIR = Path(__file__).resolve().parent.parent
@@ -34,118 +29,65 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
-log = logging.getLogger("agent")
+log = logging.getLogger("listener")
 
 for line in (CB_DIR / ".env").read_text(encoding="utf-8").splitlines():
     if "=" in line and not line.startswith("#"):
         k, _, v = line.partition("="); k=k.strip(); v=v.strip()
         if k and k not in os.environ: os.environ[k] = v
 
-ROLE    = os.environ.get("CB_SYNC_ROLE", "primary")
-CHANNEL = "cb_agents"
-REDIS_HOST = "127.0.0.1"
-REDIS_PORT = int(os.environ.get("VPS_REDIS_PORT", 6380))
+ROLE = os.environ.get("CB_SYNC_ROLE", "primary")
 
-import redis as _redis
-
-r = _redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-
-
-def publish(to: str, msg: str, msg_type: str = "response", reply_to: str | None = None) -> None:
-    payload = {
-        "to":       to,
-        "from":     ROLE,
-        "id":       str(uuid.uuid4())[:8],
-        "reply_to": reply_to,
-        "type":     msg_type,
-        "msg":      msg,
-    }
-    r.publish(CHANNEL, json.dumps(payload))
-    log.info(">> [%s -> %s] %s", ROLE, to, msg[:120])
+sys.path.insert(0, str(CB_DIR))
+from scripts.agent_comms import send, listen, write_heartbeat
 
 
 def run_claude(instruction: str) -> str:
-    """Pipe instruction into claude --print and return response."""
-    log.info("Running claude --print for: %s", instruction[:100])
+    """Pipe instruction into claude --print and return the response."""
+    log.info("Invoking claude --print for: %s", instruction[:100])
     try:
         result = subprocess.run(
-            ["claude", "--print", "--dangerously-skip-permissions", instruction],
+            ["claude", "--print", "--dangerously-skip-permissions",
+             f"You are the CareerBridge agent on the {ROLE} machine at {CB_DIR}. "
+             f"Another engineer sent this instruction:\n\n{instruction}\n\n"
+             f"Execute it. Report what you did and any issues concisely."],
             cwd=str(CB_DIR),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=300,
         )
-        out = result.stdout.strip()
-        if result.returncode != 0 and result.stderr:
-            out = f"[exit {result.returncode}] {result.stderr[:500]}\n{out}"
-        return out or "(no output)"
+        return result.stdout.strip() or f"[exit {result.returncode}] {result.stderr[:300]}"
     except subprocess.TimeoutExpired:
         return "[TIMEOUT after 300s]"
     except Exception as e:
         return f"[ERROR: {e}]"
 
 
-def handle(msg: dict) -> None:
-    """Process an inbound message addressed to this machine."""
-    sender   = msg.get("from", "unknown")
-    msg_id   = msg.get("id", "?")
-    msg_type = msg.get("type", "instruction")
-    text     = msg.get("msg", "")
+def on_message(payload: dict) -> None:
+    sender   = payload.get("from", "unknown")
+    msg_type = payload.get("type", "instruction")
+    text     = payload.get("msg", "")
+    msg_id   = payload.get("id", "?")
 
-    log.info("<< [%s -> %s] id=%s type=%s: %s", sender, ROLE, msg_id, msg_type, text[:120])
+    log.info("MSG from %s (id=%s type=%s): %s", sender, msg_id, msg_type, text[:100])
 
-    if msg_type == "response":
-        # Just log it — primary reads responses, doesn't re-execute them
-        log.info("RESPONSE from %s: %s", sender, text[:500])
+    if msg_type in ("response", "status"):
+        log.info("RESPONSE from %s: %s", sender, text[:400])
         return
 
-    # It's an instruction — run it through Claude
-    response = run_claude(
-        f"You are the CareerBridge agent on the {ROLE} machine at {CB_DIR}. "
-        f"Another engineer ({sender} machine) sent you this instruction:\n\n"
-        f"{text}\n\n"
-        f"Execute it. Be concise in your response — report what you did and any issues."
-    )
-
-    # Publish response back
-    publish(to=sender, msg=response, msg_type="response", reply_to=msg_id)
+    response = run_claude(text)
+    send(to=sender, msg=response, msg_type="response")
 
 
-def listen() -> None:
-    log.info("Agent listener starting — role=%s  redis=%s:%d  channel=%s",
-             ROLE, REDIS_HOST, REDIS_PORT, CHANNEL)
+def main():
+    log.info("agent_listener starting — role=%s", ROLE)
 
-    pubsub = r.pubsub()
-    pubsub.subscribe(CHANNEL)
+    # Announce online
+    send("broadcast", f"{ROLE} agent online at {CB_DIR}", msg_type="status")
 
-    # Announce presence
-    publish(
-        to="broadcast",
-        msg=f"{ROLE} agent online at {CB_DIR}. Ready.",
-        msg_type="status",
-    )
-
-    for raw in pubsub.listen():
-        if raw["type"] != "message":
-            continue
-        try:
-            msg = json.loads(raw["data"])
-        except json.JSONDecodeError:
-            continue
-
-        recipient = msg.get("to", "")
-        sender    = msg.get("from", "")
-
-        # Skip our own messages
-        if sender == ROLE:
-            continue
-
-        # Process if addressed to us or broadcast
-        if recipient in (ROLE, "broadcast"):
-            handle(msg)
+    # Listen blocks forever; heartbeat is handled by state_daemon
+    listen(on_message)
 
 
 if __name__ == "__main__":
-    listen()
+    main()

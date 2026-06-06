@@ -163,24 +163,45 @@ def check_inbox() -> None:
         log.error("check_inbox failed: %s", e)
 
 
+def _write_heartbeat() -> None:
+    """Write cb:heartbeat:{role} to Redis with TTL. VPS MCP reads this to show online nodes."""
+    try:
+        import redis
+        r = redis.Redis(host="127.0.0.1",
+                        port=int(os.environ.get("VPS_REDIS_PORT", 6380)),
+                        decode_responses=True, socket_connect_timeout=2)
+        r.setex(f"cb:heartbeat:{ROLE}", 90, "1")
+    except Exception as e:
+        log.debug("Heartbeat write failed (tunnel down?): %s", e)
+
+
 def main():
     log.info("state_daemon starting — role=%s  cb_dir=%s", ROLE, CB_DIR)
-    last_state_write = 0.0
-    # Write immediately on startup, then every 60s
+    last_state_write  = 0.0
+    last_heartbeat    = 0.0
+
+    # Write state immediately on startup
     state = collect_state()
     write_state(state)
     last_state_write = time.monotonic()
+    _write_heartbeat()
+    last_heartbeat = time.monotonic()
 
     while True:
         now = time.monotonic()
 
-        # Write state every 60s
+        # Write full state every 60s
         if now - last_state_write >= 60:
             state = collect_state()
             write_state(state)
             last_state_write = now
 
-        # Check inbox every 10s
+        # Write heartbeat every 30s (TTL=90s so two missed beats before expiry)
+        if now - last_heartbeat >= 30:
+            _write_heartbeat()
+            last_heartbeat = now
+
+        # Check pending_instructions inbox every 10s
         check_inbox()
         time.sleep(10)
 
