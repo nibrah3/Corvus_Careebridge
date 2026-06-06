@@ -175,10 +175,83 @@ def _write_heartbeat() -> None:
         log.debug("Heartbeat write failed (tunnel down?): %s", e)
 
 
+def _tg(text: str) -> None:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat  = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "").strip()
+    if not token or not chat:
+        return
+    try:
+        import urllib.request
+        body = json.dumps({"chat_id": int(chat), "text": text}).encode()
+        req  = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=body, headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        log.debug("Telegram report failed: %s", e)
+
+
+def _send_report(state: dict) -> None:
+    """Send 30-minute status report to Telegram."""
+    mcp   = state.get("mcp_ports", {})
+    tun   = state.get("tunnel_ports", {})
+    vbs   = state.get("startup_vbs", [])
+    hooks = state.get("hook_paths_ok", False)
+    sha   = (state.get("git_sha") or "")[:8]
+    pip   = state.get("pip_count", 0)
+
+    mcp_down = [k for k, v in mcp.items() if not v]
+    tun_down = [k for k, v in tun.items() if not v]
+
+    # Pending instructions count
+    pending = 0
+    try:
+        import psycopg2
+        conn = psycopg2.connect(DSN, connect_timeout=5)
+        cur  = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM pending_instructions WHERE to_machine=%s AND status='pending'", (ROLE,))
+        pending = cur.fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+
+    # Last line from agent_listener log
+    last_msg = ""
+    listener_log = CB_DIR / "logs" / "agent_listener.log"
+    if listener_log.exists():
+        try:
+            lines = listener_log.read_text(encoding="utf-8", errors="replace").splitlines()
+            last = next((l for l in reversed(lines) if "MSG from" in l or "RESPONSE" in l), "")
+            if last:
+                last_msg = f"\nLast msg: {last[-120:]}"
+        except Exception:
+            pass
+
+    status_mcp = "all UP" if not mcp_down else f"DOWN: {', '.join(mcp_down)}"
+    status_tun = "all UP" if not tun_down else f"DOWN: {', '.join(tun_down)}"
+    hooks_str  = "OK" if hooks else "WRONG PATHS"
+
+    lines = [
+        f"[{ROLE.upper()}] 30-min report",
+        f"SHA: {sha}  pip: {pip}  hooks: {hooks_str}",
+        f"MCPs: {status_mcp}",
+        f"Tunnel: {status_tun}",
+        f"Startup VBS: {len(vbs)}/4",
+        f"Pending instructions: {pending}",
+    ]
+    if last_msg:
+        lines.append(last_msg)
+
+    _tg("\n".join(lines))
+    log.info("30-min report sent to Telegram")
+
+
 def main():
     log.info("state_daemon starting — role=%s  cb_dir=%s", ROLE, CB_DIR)
     last_state_write  = 0.0
     last_heartbeat    = 0.0
+    last_report       = 0.0
 
     # Write state immediately on startup
     state = collect_state()
@@ -200,6 +273,13 @@ def main():
         if now - last_heartbeat >= 30:
             _write_heartbeat()
             last_heartbeat = now
+
+        # Send Telegram status report every 30 minutes
+        if now - last_report >= 1800:
+            if not state:
+                state = collect_state()
+            _send_report(state)
+            last_report = now
 
         # Check pending_instructions inbox every 10s
         check_inbox()
