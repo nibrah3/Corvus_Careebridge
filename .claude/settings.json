@@ -2,6 +2,15 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Python314\\python.exe E:\\Corvus_Careebridge\\hooks\\hook_inbox.py"
+          }
+        ]
+      },
+      {
         "matcher": "mcp__cdp__cdp_eval",
         "hooks": [
           {
