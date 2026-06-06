@@ -166,6 +166,10 @@ def check_inbox() -> None:
 def main():
     log.info("state_daemon starting — role=%s  cb_dir=%s", ROLE, CB_DIR)
     last_state_write = 0.0
+    # Write immediately on startup, then every 60s
+    state = collect_state()
+    write_state(state)
+    last_state_write = time.monotonic()
 
     while True:
         now = time.monotonic()

@@ -78,11 +78,12 @@ for fname, content in vbs.items():
 # ── 3. Start state_daemon in background ──────────────────────────────────────
 print("\n[3/4] Starting state_daemon in background...")
 existing = subprocess.run(
-    ["wmic","process","where","CommandLine like '%state_daemon%'","get","ProcessId"],
+    ["wmic","process","where","CommandLine like '%state_daemon.py%'","get","ProcessId","/value"],
     capture_output=True, text=True
 )
-if "ProcessId" in existing.stdout and existing.stdout.count("\n") > 2:
-    print("   state_daemon already running")
+running = [l for l in existing.stdout.splitlines() if l.startswith("ProcessId=") and l.strip() != "ProcessId="]
+if running:
+    print(f"   state_daemon already running: {running}")
 else:
     subprocess.Popen(
         [str(PYW), str(CB_DIR / "scripts" / "state_daemon.py")],
