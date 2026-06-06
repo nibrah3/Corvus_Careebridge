@@ -12,8 +12,9 @@ Call AskUserQuestion:
 question: "What do you want to apply to?"
 header:   "Apply"
 options:
-  - label: "Jobs"     description: "N jobs ready in your queue"
-  - label: "Schools"  description: "N schools found — online enrollment"
+  - label: "Jobs"        description: "N jobs ready in your queue"
+  - label: "Schools"     description: "N schools found — online enrollment"
+  - label: "I have a link"  description: "Paste a job URL, assessment link, or school page you found yourself"
 ```
 
 Get the count for each from VPS:
@@ -22,7 +23,7 @@ Get the count for each from VPS:
 
 ---
 
-## Step 2 — Show the queue (jobs or schools)
+## Step 2 — Show the queue (jobs or schools) OR take a custom URL
 
 ### Jobs
 Call `mcp__vps__get_pending_jobs(limit=10)`.
@@ -32,12 +33,13 @@ Present as AskUserQuestion cards — ONE at a time:
 question: "[Job Title] at [Company]"
 header:   "[job_type] · [sector]"
 options:
-  - label: "Apply"      description: "Start application with browser automation"
-  - label: "Skip"       description: "Remove from queue"
-  - label: "More Info"  description: "See full description and URL"
+  - label: "Apply"         description: "Start application with browser automation"
+  - label: "I have a link" description: "Use a different URL for this job (e.g. direct application page)"
+  - label: "Skip"          description: "Remove from queue"
   - label: "Back"
 ```
 
+If user picks "I have a link": ask for the URL, then proceed to Step 3 with that URL (keep existing job context — title, company — if available).
 Show quality issues inline if present. Use official_url as primary link.
 
 ### Schools
@@ -48,11 +50,34 @@ Present one at a time:
 question: "[School Name]"
 header:   "[State] · Score [N]/6"
 options:
-  - label: "Enroll"     description: "Start enrollment with browser automation"
+  - label: "Enroll"        description: "Start enrollment with browser automation"
+  - label: "I have a link" description: "Use a different enrollment URL for this school"
   - label: "Skip"
-  - label: "More Info"  description: "See criteria met and enrollment URL"
   - label: "Back"
 ```
+
+If user picks "I have a link": ask for the URL, then proceed to Step 3.
+
+### I have a link (from Step 1)
+Ask the user:
+```
+question: "Paste the URL you want to work on:"
+header:   "Your Link"
+```
+(free text — accept any URL)
+
+Also ask (optional, can skip):
+```
+question: "Any context? (job title, company, or what type this is)"
+header:   "Context"
+options:
+  - label: "Job assessment"   description: "MCQ, personality test, skills test"
+  - label: "Job application"  description: "Application form — may need CV upload"
+  - label: "School page"      description: "Online enrollment form"
+  - label: "Not sure"         description: "I'll detect it when I open the page"
+```
+
+Store the URL and any provided context, then proceed to Step 3.
 
 ---
 
@@ -64,13 +89,22 @@ Get back: `cdp_url`, `browser_name`, `profile_name`, `profile_id`.
 
 ---
 
-## Step 4 — Run the pipeline (autonomous)
+## Step 4 — Detect job type (for custom URLs) then run the pipeline
+
+For jobs from the queue: use the `job_type` field already on the record.
+
+For custom URLs (user-provided link or "Not sure"): navigate to the page first, then detect:
+- File upload field present → **application form**
+- Video player or upload prompt → **video annotation**
+- Image grid or annotation canvas → **image annotation**
+- MCQ / radio / essay only → **text assessment**
 
 Pass to the appropriate skill:
-- **Job / text form** → `sops/sop_text_assessment.md`
+- **Job / application form** → `prompts/skill_cv_application.md` (handles personal details + CV, then completes remaining form fields)
+- **Job / text assessment** → `sops/sop_text_assessment.md`
 - **Job / image annotation** → `sops/sop_image_annotation.md`
 - **Job / video annotation** → `sops/sop_video_annotation.md`
-- **School enrollment** → same as text form — `sops/sop_text_assessment.md`
+- **School enrollment** → `sops/sop_text_assessment.md`
 
 The pipeline runs autonomously and pauses only when:
 
