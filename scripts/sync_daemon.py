@@ -33,7 +33,7 @@ from pathlib import Path
 REPO_DIR  = Path(os.environ.get("CB_DIR", Path(__file__).resolve().parent.parent))
 LOG_FILE  = REPO_DIR / "logs" / "sync_daemon.log"
 PYTHON    = Path(os.environ.get("CB_PYTHON", "C:/Python314/python.exe"))
-POLL_SECS = 300
+POLL_SECS = 30
 BRANCH    = "master"
 REMOTE    = "origin"
 
