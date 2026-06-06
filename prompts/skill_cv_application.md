@@ -40,26 +40,27 @@ Missing fields: ask only for those, one at a time.
 
 If no CV upload field detected on the page: skip this step entirely.
 
-If CV upload is needed, ask:
+If CV upload is needed, check whether a `scraped_jd` is already in context
+(set by skill_apply.md when the user provided a custom link):
+- If `scraped_jd` present: default recommendation is "Generate a new one" — we already have the JD, so tailoring is free. Skip the firecrawl call in Option B.
+- If no `scraped_jd`: all three options are equal — ask without a recommended default.
 
 Call AskUserQuestion:
 ```
 question: "This application needs a CV. Which would you like to use?"
 header:   "CV"
 options:
+  - label: "Generate a new one"  description: "Claude writes a tailored CV using the job description already fetched (Recommended)" [show only when scraped_jd present]
+  - label: "Generate a new one"  description: "Claude writes a tailored CV for this job" [show when no scraped_jd]
   - label: "My saved CV"         description: "Use the CV file already on your profile"
-  - label: "Generate a new one"  description: "Claude writes a tailored CV for this job"
   - label: "I'll provide my own" description: "Give me a file path or paste your CV"
 ```
 
-### Option A — My saved CV
-Read `cv_file_path` from profile.
-If file exists on disk: upload it directly. Done.
-If file not found: fall through to Option C.
-
-### Option B — Generate a tailored CV
-1. Call `mcp__vps__firecrawl_scrape(job_url)` — get job description
-2. Extract: title, company, required skills, preferred skills, tech stack
+### Option A — Generate a tailored CV
+1. **If `scraped_jd` already in context**: use it directly — skip firecrawl.
+   **If not**: call `mcp__vps__firecrawl_scrape(job_url)` to get the job description.
+   If firecrawl fails: ask user to paste the JD text.
+2. Extract from JD: title, company, required skills (exact phrases), preferred skills, tech stack, years of experience, education requirements
 3. Read profile: name, bio, skills array, work_history array, education
 4. Write CV sections in context (you are the LLM — no external call):
    - Summary: 3-4 sentences referencing top required skills using JD phrasing
@@ -70,6 +71,11 @@ If file not found: fall through to Option C.
 6. Run via Bash: `python E:\Corvus_Careebridge\scripts\format_cv.py --profile-id {id} --sections-json "{json}"`
 7. Show user: ATS match score, top matched skills, gaps, file path
 8. Ask: "Use this CV for the application?" → Yes / Regenerate / Cancel
+
+### Option B — My saved CV
+Read `cv_file_path` from profile.
+If file exists on disk: upload it directly. Done.
+If file not found: fall through to Option C.
 
 ### Option C — I'll provide my own
 Ask:
@@ -82,6 +88,9 @@ options:
 ```
 File path: read and verify it exists → use for upload.
 Paste text: save to `C:\Users\<user>\Desktop\MyCV.pdf` via format_cv.py → upload.
+
+**After CV is uploaded:** continue filling remaining form fields following `sops/sop_text_assessment.md`
+starting at Step 1 (extract all questions), skipping any fields already filled (name, email, phone).
 
 ---
 

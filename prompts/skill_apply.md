@@ -18,15 +18,15 @@ options:
 ```
 
 Get the count for each from VPS:
-- Jobs: `mcp__vps__count_jobs(status="pending")`
-- Schools: `mcp__vps__count_schools(criteria_score_min=1, online_available=true)`
+- Jobs: `mcp__vps__list_jobs(status="pending", limit=1)` → use `count` field from response
+- Schools: `mcp__schools__list_confirmed_schools(min_score=1, limit=1)` → use `count` field from response
 
 ---
 
 ## Step 2 — Show the queue (jobs or schools) OR take a custom URL
 
 ### Jobs
-Call `mcp__vps__get_pending_jobs(limit=10)`.
+Call `mcp__vps__list_jobs(status="pending", limit=10)`.
 
 Present as AskUserQuestion cards — ONE at a time:
 ```
@@ -66,18 +66,26 @@ header:   "Your Link"
 ```
 (free text — accept any URL)
 
-Also ask (optional, can skip):
+**Immediately after receiving the URL** — before asking anything else:
+Call `mcp__vps__firecrawl_scrape(url)` to fetch the job description from VPS.
+
+- If firecrawl returns content: extract title, company, required skills. Store as `scraped_jd` in context.
+  Tell the user: "Got it — [Job Title] at [Company]. I'll use this to tailor your CV."
+- If firecrawl returns empty or error: tell user "Couldn't fetch the page — you can paste the job description text if you have it, or I'll detect the content when I open the browser."
+  Accept pasted text as fallback, or proceed without JD (CV generation will ask for it later).
+
+Then ask:
 ```
-question: "Any context? (job title, company, or what type this is)"
-header:   "Context"
+question: "What type is this?"
+header:   "Link type"
 options:
-  - label: "Job assessment"   description: "MCQ, personality test, skills test"
-  - label: "Job application"  description: "Application form — may need CV upload"
+  - label: "Job application"  description: "Application form — I'll tailor a CV and fill the form"
+  - label: "Job assessment"   description: "MCQ, personality test, or skills test"
   - label: "School page"      description: "Online enrollment form"
   - label: "Not sure"         description: "I'll detect it when I open the page"
 ```
 
-Store the URL and any provided context, then proceed to Step 3.
+Store the URL, scraped JD (if any), and type context. Proceed to Step 3.
 
 ---
 
@@ -131,7 +139,7 @@ Full answer summary → Submit / Wait, go back.
 
 ## After completion
 
-- `mcp__vps__update_job_status(job_id, status="applied")`  (or school equivalent)
+- `mcp__vps__update_job_status(job_id=job_id, status="applied", result="")` (or school equivalent — mark school applied in DB)
 - `mcp__telegram__notify("Applied: [Title] / [Profile Name]")`
 - Show next item in queue or return to Apply menu.
 
