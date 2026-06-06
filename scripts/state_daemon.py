@@ -175,25 +175,12 @@ def _write_heartbeat() -> None:
         log.debug("Heartbeat write failed (tunnel down?): %s", e)
 
 
-def _tg(text: str) -> None:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat  = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "").strip()
-    if not token or not chat:
-        return
-    try:
-        import urllib.request
-        body = json.dumps({"chat_id": int(chat), "text": text}).encode()
-        req  = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=body, headers={"Content-Type": "application/json"},
-        )
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        log.debug("Telegram report failed: %s", e)
+REPORT_FILE = CB_DIR / "logs" / "status_report.json"
 
 
 def _send_report(state: dict) -> None:
-    """Send 30-minute status report to Telegram."""
+    """Write 30-minute status report to logs/status_report.json.
+    hook_report.py (UserPromptSubmit) injects it into the Claude Code session."""
     mcp   = state.get("mcp_ports", {})
     tun   = state.get("tunnel_ports", {})
     vbs   = state.get("startup_vbs", [])
@@ -232,19 +219,21 @@ def _send_report(state: dict) -> None:
     status_tun = "all UP" if not tun_down else f"DOWN: {', '.join(tun_down)}"
     hooks_str  = "OK" if hooks else "WRONG PATHS"
 
-    lines = [
-        f"[{ROLE.upper()}] 30-min report",
-        f"SHA: {sha}  pip: {pip}  hooks: {hooks_str}",
-        f"MCPs: {status_mcp}",
-        f"Tunnel: {status_tun}",
-        f"Startup VBS: {len(vbs)}/4",
-        f"Pending instructions: {pending}",
-    ]
-    if last_msg:
-        lines.append(last_msg)
-
-    _tg("\n".join(lines))
-    log.info("30-min report sent to Telegram")
+    report = {
+        "machine":  ROLE,
+        "time":     time.strftime("%Y-%m-%d %H:%M"),
+        "sha":      sha,
+        "pip":      pip,
+        "hooks":    hooks_str,
+        "mcp":      status_mcp,
+        "tunnel":   status_tun,
+        "vbs":      f"{len(vbs)}/4",
+        "pending":  pending,
+        "last_msg": last_msg.strip(),
+        "shown":    False,
+    }
+    REPORT_FILE.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    log.info("30-min report written to %s", REPORT_FILE)
 
 
 def main():
