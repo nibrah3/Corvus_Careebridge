@@ -72,21 +72,39 @@ _STRONG_SIGNAL = re.compile(
 
 # ── Firecrawl ─────────────────────────────────────────────────────────────────
 
-def firecrawl_scrape(url: str, timeout: int = 25) -> dict:
-    """Return {text, markdown, success, error}."""
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+def _direct_fetch(url: str, timeout: int = 15) -> str:
+    """Plain HTTP GET + strip tags. Fallback when Firecrawl returns empty."""
     try:
-        # Ensure URL has scheme
-        if not url.startswith("http"):
-            url = "https://" + url
+        import html, re as _re
+        r = requests.get(url, headers=_HEADERS, timeout=timeout, allow_redirects=True)
+        r.raise_for_status()
+        text = r.text
+        # Strip script/style blocks
+        text = _re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
+        # Strip all tags
+        text = _re.sub(r"<[^>]+>", " ", text)
+        text = html.unescape(text)
+        text = _re.sub(r"\s+", " ", text)
+        return text[:8000]
+    except Exception:
+        return ""
+
+
+def firecrawl_scrape(url: str, timeout: int = 20) -> dict:
+    """Firecrawl first, direct HTTP fallback if empty. Returns {text, success, error}."""
+    if not url.startswith("http"):
+        url = "https://" + url
+    try:
         r = requests.post(
             f"{FIRECRAWL_URL}/v1/scrape",
-            json={
-                "url": url,
-                "formats": ["markdown"],
-                "onlyMainContent": True,
-                "timeout": timeout * 1000,
-                "waitFor": 1000,
-            },
+            json={"url": url, "formats": ["markdown"], "onlyMainContent": True,
+                  "timeout": timeout * 1000},
             timeout=timeout + 5,
         )
         r.raise_for_status()
@@ -94,12 +112,17 @@ def firecrawl_scrape(url: str, timeout: int = 25) -> dict:
         if data.get("success"):
             content = data.get("data", {})
             text = content.get("markdown") or content.get("content") or ""
-            return {"text": text, "success": True, "error": None}
-        return {"text": "", "success": False, "error": data.get("error", "scrape_failed")}
-    except requests.Timeout:
-        return {"text": "", "success": False, "error": "timeout"}
-    except Exception as e:
-        return {"text": "", "success": False, "error": str(e)[:100]}
+            if len(text) > 200:
+                return {"text": text, "success": True, "error": None, "source": "firecrawl"}
+            # Firecrawl returned too little — fall through to direct
+    except Exception:
+        pass
+
+    # Direct HTTP fallback
+    text = _direct_fetch(url, timeout=15)
+    if text:
+        return {"text": text, "success": True, "error": None, "source": "direct"}
+    return {"text": "", "success": False, "error": "empty_response", "source": "failed"}
 
 
 # ── Classify crawled page ─────────────────────────────────────────────────────
