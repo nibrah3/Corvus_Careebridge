@@ -206,14 +206,10 @@ def classify(row: dict, sc: dict) -> dict:
         online_evidence  = f"raw_text:{m.group(0)[:50]}"
         classified_by    = "raw_text"
     else:
-        found, evidence = serper_check_online(name, city, state)
-        if found:
-            online_available = True
-            online_evidence  = evidence
-            classified_by    = "serper"
-        else:
-            online_evidence = evidence
-            classified_by   = "serper_negative"
+        # Serper fallback disabled — schools with no raw_text/scorecard signal
+        # are marked not_online. They can be re-run with Serper later if needed.
+        online_evidence = "no_signal"
+        classified_by   = "no_signal"
 
     # ── 6 Filters ─────────────────────────────────────────────────────────────
 
