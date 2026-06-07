@@ -32,7 +32,7 @@ from pathlib import Path
 
 REPO_DIR  = Path(os.environ.get("CB_DIR", Path(__file__).resolve().parent.parent))
 LOG_FILE  = REPO_DIR / "logs" / "sync_daemon.log"
-PYTHON    = Path(os.environ.get("CB_PYTHON", "C:/Python314/python.exe"))
+PYTHON    = Path(os.environ.get("CB_PYTHON", "C:/Python314/pythonw.exe"))
 POLL_SECS = 30
 BRANCH    = "master"
 REMOTE    = "origin"
@@ -65,6 +65,7 @@ def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         ["git", "-C", str(REPO_DIR), *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         check=check,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
 
@@ -174,6 +175,7 @@ def _claude_resolve(filepath: str) -> None:
             ["claude", "--print", "--dangerously-skip-permissions", prompt],
             cwd=str(REPO_DIR),
             timeout=180,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         log.info("Claude finished for %s", filepath)
     except Exception as exc:
