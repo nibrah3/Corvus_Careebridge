@@ -8,13 +8,47 @@ OS delivery:     pyinterception (kernel driver, no LLKHF_INJECTED) if available,
                  falls back to pynput (SendInput, relative coordinates)
 Click model:     mouseDown + ex-Gaussian hold + mouseUp (not atomic pyautogui.click)
 Overshoot:       ~30% chance on moves >300px — corrective sub-movement after arrival
+Cursor trail:    enable_cursor_trail() / disable_cursor_trail() — Windows only.
+                 Makes the cursor path visible as a ghost trail during movement.
 """
 from __future__ import annotations
 
+import ctypes
 import math
 import random
+import sys
 import time
 from typing import Tuple
+
+# ── Cursor trail (Windows only) ───────────────────────────────────────────────
+
+_SPI_SETMOUSETRAILS = 0x005D
+_SPIF_UPDATEINIFILE = 0x0001
+_SPIF_SENDCHANGE    = 0x0002
+
+
+def enable_cursor_trail(length: int = 6) -> None:
+    """
+    Enable Windows cursor ghost trail so mouse movement is visually trackable.
+    length: number of ghost cursor images (2-15; 6 is clearly visible).
+    Call once at session start. Persists until disable_cursor_trail() or reboot.
+    """
+    if sys.platform != "win32":
+        return
+    ctypes.windll.user32.SystemParametersInfoW(
+        _SPI_SETMOUSETRAILS, length, None,
+        _SPIF_UPDATEINIFILE | _SPIF_SENDCHANGE,
+    )
+
+
+def disable_cursor_trail() -> None:
+    """Remove cursor trail. Call when assessment session is done."""
+    if sys.platform != "win32":
+        return
+    ctypes.windll.user32.SystemParametersInfoW(
+        _SPI_SETMOUSETRAILS, 0, None,
+        _SPIF_UPDATEINIFILE | _SPIF_SENDCHANGE,
+    )
 
 from ._profile import BehaviorProfile
 from ._distributions import sample_pre_click, sample_hold, sample_mouse_tremor

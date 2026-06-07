@@ -6,11 +6,16 @@ Timing model: ex-Gaussian (exponnorm) inter-keystroke intervals
               + fatigue: 0.05% slowdown per character typed
               + QWERTY physical neighbor typos at configurable error rate
               + realistic key hold duration (not instantaneous press/release)
-Unicode:      pynput.keyboard.Controller.type() — correct on Windows, no admin needed
+Unicode:      pynput for ASCII/common chars; SendInput+KEYEVENTF_UNICODE for
+              non-ASCII characters that pynput cannot map (e.g. U+2009 thin space,
+              em-dash, smart quotes). No admin required on Windows.
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import random
+import sys
 import time
 
 from ._profile import BehaviorProfile
@@ -25,6 +30,7 @@ from ._distributions import (
 
 _kb = None
 _Key = None
+_IS_WINDOWS = sys.platform == "win32"
 
 
 def _ensure_kb() -> None:
@@ -39,14 +45,78 @@ def _ensure_kb() -> None:
         raise ImportError(f"pynput keyboard not available: {exc}. pip install pynput")
 
 
+# ── Windows SendInput Unicode fallback ───────────────────────────────────────
+# Used for any character pynput cannot map via VkKeyScan (ordinal > 127 that
+# has no virtual key code on the current keyboard layout, e.g. U+2009 thin space).
+
+if _IS_WINDOWS:
+    _KEYEVENTF_UNICODE = 0x0004
+    _KEYEVENTF_KEYUP   = 0x0002
+    _INPUT_KEYBOARD    = 1
+
+    class _KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk",         ctypes.wintypes.WORD),
+            ("wScan",       ctypes.wintypes.WORD),
+            ("dwFlags",     ctypes.wintypes.DWORD),
+            ("time",        ctypes.wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_ulong),
+        ]
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = [("ki", _KEYBDINPUT)]
+
+    class _INPUT_STRUCT(ctypes.Structure):
+        _anonymous_ = ("_u",)
+        _fields_    = [("type", ctypes.wintypes.DWORD), ("_u", _INPUT_UNION)]
+
+    def _sendinput_unicode(ch: str, hold_secs: float) -> None:
+        """Deliver one Unicode character via SendInput+KEYEVENTF_UNICODE (key-down + key-up)."""
+        code = ord(ch) & 0xFFFF   # BMP only — surrogate pairs need two calls
+        inp_dn = _INPUT_STRUCT()
+        inp_dn.type = _INPUT_KEYBOARD
+        inp_dn.ki.wVk    = 0
+        inp_dn.ki.wScan  = code
+        inp_dn.ki.dwFlags = _KEYEVENTF_UNICODE
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp_dn), ctypes.sizeof(inp_dn))
+        time.sleep(hold_secs)
+        inp_up = _INPUT_STRUCT()
+        inp_up.type = _INPUT_KEYBOARD
+        inp_up.ki.wVk    = 0
+        inp_up.ki.wScan  = code
+        inp_up.ki.dwFlags = _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(inp_up))
+else:
+    def _sendinput_unicode(ch: str, hold_secs: float) -> None:
+        pass   # non-Windows: no-op, pynput handles it
+
+
 # ── Key injection primitives ──────────────────────────────────────────────────
 
 def _press_char(char: str, hold_secs: float) -> None:
-    """Press and release a single character with realistic hold duration."""
+    """
+    Press and release a single character with realistic hold duration.
+
+    Non-ASCII (ordinal > 127) always goes through SendInput+KEYEVENTF_UNICODE
+    on Windows — bypasses pynput which silently maps some chars to wrong
+    codepoints (e.g. U+2009 thin space becomes U+0020 regular space).
+    """
     _ensure_kb()
-    _kb.press(char)
-    time.sleep(hold_secs)
-    _kb.release(char)
+    if _IS_WINDOWS and ord(char) > 127:
+        _sendinput_unicode(char, hold_secs)
+        return
+    try:
+        _kb.press(char)
+        time.sleep(hold_secs)
+        _kb.release(char)
+    except Exception:
+        if _IS_WINDOWS:
+            _sendinput_unicode(char, hold_secs)
+        else:
+            try:
+                _kb.type(char)
+            except Exception:
+                pass
 
 
 def _backspace(hold_secs: float) -> None:
@@ -103,15 +173,8 @@ def type_text(
                 # Brief pause after correction — cognitive reset
                 time.sleep(max(0.03, rng.gauss(0.06, 0.02)))
 
-        # Type the correct character
-        try:
-            _press_char(char, hold)
-        except Exception:
-            # Unicode char that pynput can't press directly — use type()
-            try:
-                _kb.type(char)
-            except Exception:
-                pass  # skip unmappable characters
+        # Type the correct character (Unicode fallback handled inside _press_char)
+        _press_char(char, hold)
 
         profile.chars_typed += 1
 

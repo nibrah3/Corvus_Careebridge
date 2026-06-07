@@ -236,7 +236,63 @@ def _send_report(state: dict) -> None:
     log.info("30-min report written to %s", REPORT_FILE)
 
 
+def listen_inbox() -> None:
+    """
+    Subscription-based inbox delivery using Postgres LISTEN/NOTIFY.
+    Runs in a background thread alongside the main loop.
+
+    When pending_instructions INSERT fires NOTIFY cb_inbox_{role},
+    this thread wakes immediately and delivers to inbox.json — no polling lag.
+    Falls back to check_inbox() poll every 60s as belt-and-suspenders.
+    """
+    import psycopg2, select as _select
+
+    channel = f"cb_inbox_{ROLE}"
+    conn    = None
+
+    def _connect():
+        c = psycopg2.connect(DSN, connect_timeout=10)
+        c.set_isolation_level(0)   # autocommit required for LISTEN
+        c.cursor().execute(f"LISTEN {channel}")
+        log.info("[LISTEN] Subscribed to Postgres channel: %s", channel)
+        return c
+
+    last_fallback = time.monotonic()
+
+    while True:
+        try:
+            if conn is None or conn.closed:
+                conn = _connect()
+
+            # Block up to 30s waiting for a notification
+            readable, _, _ = _select.select([conn], [], [], 30)
+
+            if readable:
+                conn.poll()
+                while conn.notifies:
+                    n = conn.notifies.pop(0)
+                    log.info("[LISTEN] NOTIFY on %s payload=%s — delivering now", n.channel, n.payload)
+                    check_inbox()
+
+            # Fallback poll every 60s in case a NOTIFY was lost
+            if time.monotonic() - last_fallback >= 60:
+                check_inbox()
+                last_fallback = time.monotonic()
+
+        except Exception as e:
+            log.warning("[LISTEN] connection error: %s — reconnecting in 10s", e)
+            try:
+                if conn and not conn.closed:
+                    conn.close()
+            except Exception:
+                pass
+            conn = None
+            time.sleep(10)
+
+
 def main():
+    import threading
+
     log.info("state_daemon starting — role=%s  cb_dir=%s", ROLE, CB_DIR)
     last_state_write  = 0.0
     last_heartbeat    = 0.0
@@ -249,30 +305,30 @@ def main():
     _write_heartbeat()
     last_heartbeat = time.monotonic()
 
+    # Start subscription-based inbox listener in background thread
+    t = threading.Thread(target=listen_inbox, daemon=True, name="listen_inbox")
+    t.start()
+    log.info("LISTEN thread started (channel: cb_inbox_%s)", ROLE)
+
     while True:
         now = time.monotonic()
 
-        # Write full state every 60s
         if now - last_state_write >= 60:
             state = collect_state()
             write_state(state)
             last_state_write = now
 
-        # Write heartbeat every 30s (TTL=90s so two missed beats before expiry)
         if now - last_heartbeat >= 30:
             _write_heartbeat()
             last_heartbeat = now
 
-        # Send Telegram status report every 30 minutes
         if now - last_report >= 1800:
             if not state:
                 state = collect_state()
             _send_report(state)
             last_report = now
 
-        # Check pending_instructions inbox every 10s
-        check_inbox()
-        time.sleep(10)
+        time.sleep(30)   # main loop only needs to run every 30s now
 
 
 if __name__ == "__main__":

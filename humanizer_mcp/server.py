@@ -22,11 +22,17 @@ from typing import Optional
 from _minmcp import MinMCP
 
 from ._profile import BehaviorProfile
-from ._mouse import click as _mouse_click, drag as _mouse_drag, move as _mouse_move
+from ._mouse import (
+    click as _mouse_click, drag as _mouse_drag, move as _mouse_move,
+    enable_cursor_trail, disable_cursor_trail,
+)
 from ._keyboard import type_text as _kb_type, press_key as _kb_press, hotkey as _kb_hotkey
 from ._scroll import scroll as _scroll
 
 mcp = MinMCP("humanizer")
+
+# Enable cursor trail at startup so mouse movement is visually trackable
+enable_cursor_trail(length=6)
 
 # ── Session profile cache ─────────────────────────────────────────────────────
 # Keyed by profile_seed so Claude Code can pass the same seed each turn and
