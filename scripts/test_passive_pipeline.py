@@ -80,6 +80,21 @@ HTML_SERVER_PORT = 8799
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _start_html_server(html_dir: str):
+    """Serve html_dir on HTML_SERVER_PORT so Playwright can load it over http."""
+    import http.server
+    import functools
+
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler,
+        directory=html_dir,
+    )
+    srv = http.server.HTTPServer(("127.0.0.1", HTML_SERVER_PORT), handler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    return srv
+
+
 def _start_tutor_server():
     """Launch tutor_mcp server as a subprocess."""
     env = os.environ.copy()
@@ -179,12 +194,14 @@ def run_tests() -> dict:
         results["details"][name] = detail
         print(f"  FAIL  {name}: {detail}")
 
-    # ── Write test HTML to temp file ─────────────────────────────────────────
-    html_path = "C:/tmp/tutor_test_page.html"
+    # ── Write test HTML and serve via HTTP ───────────────────────────────────
     Path("C:/tmp").mkdir(exist_ok=True)
+    html_path = "C:/tmp/tutor_test_page.html"
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(TEST_HTML)
     print(f"[test] HTML written to {html_path}")
+    html_srv = _start_html_server("C:/tmp")
+    test_url = f"http://127.0.0.1:{HTML_SERVER_PORT}/tutor_test_page.html"
 
     # ── Start tutor server ───────────────────────────────────────────────────
     print("[test] Starting tutor server...")
@@ -217,7 +234,7 @@ def run_tests() -> dict:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=False, args=["--window-size=1280,900"])
                 page = browser.new_page(viewport={"width": 1280, "height": 900})
-                page.goto(f"file:///{html_path.replace(chr(92), '/')}")
+                page.goto(test_url)
                 page.wait_for_load_state("networkidle")
                 ok("browser_open", "page loaded")
 
@@ -286,6 +303,10 @@ def run_tests() -> dict:
             fail("session_saved", str(e))
 
     finally:
+        try:
+            html_srv.shutdown()
+        except Exception:
+            pass
         server_proc.terminate()
         try:
             server_proc.wait(timeout=3)
