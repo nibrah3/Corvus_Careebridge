@@ -81,17 +81,32 @@ TUTOR_SERVER_PORT = 8716
 
 def _start_tutor_server():
     """Launch tutor_mcp server as a subprocess."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "E:\\Corvus_Careebridge"
+
     proc = subprocess.Popen(
         [
-            sys.executable,
+            "C:\\Python314\\python.exe",
             "-m", "tutor_mcp.server",
             "--port", str(TUTOR_SERVER_PORT),
         ],
         cwd="E:\\Corvus_Careebridge",
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    time.sleep(3)  # allow server to bind
+    # Wait for server to bind — poll until reachable or timeout
+    import urllib.request
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            out, err = proc.communicate()
+            raise RuntimeError(f"Server exited early:\n{err.decode()[:500]}")
+        try:
+            urllib.request.urlopen(f"http://localhost:{TUTOR_SERVER_PORT}/mcp", timeout=1)
+            break
+        except Exception:
+            time.sleep(0.5)
     return proc
 
 
