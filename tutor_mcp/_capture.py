@@ -165,17 +165,41 @@ def _classify_frame(
     return FrameEvent(kind="ui_interaction", timestamp=ts)
 
 
+def _grab_mss() -> Optional[np.ndarray]:
+    """Single-shot screen capture via mss (GDI fallback)."""
+    try:
+        import mss as _mss
+        with _mss.MSS() as sct:
+            mon = sct.monitors[1]
+            sct_img = sct.grab(mon)
+            frame = np.array(sct_img)[:, :, :3]  # BGRA → BGR
+            return frame
+    except Exception:
+        return None
+
+
 def _capture_loop():
     global _snapshot, _running
 
+    import cv2
+
+    # Try DXGI first; fall back to mss if it isn't available or yields no frames
+    cam = None
+    use_dxgi = False
     try:
         import dxcam
-        import cv2
-    except ImportError:
-        return
-
-    cam = dxcam.create(output_color="BGR")
-    cam.start(target_fps=_CAPTURE_FPS)
+        cam = dxcam.create(output_color="BGR")
+        cam.start(target_fps=_CAPTURE_FPS)
+        # Probe: give it one second to produce a frame
+        time.sleep(0.5)
+        probe = cam.get_latest_frame()
+        if probe is not None:
+            use_dxgi = True
+        else:
+            cam.stop()
+            cam = None
+    except Exception:
+        cam = None
 
     prev_bgr: Optional[np.ndarray] = None
     prev_hash: Optional[int] = None
@@ -184,12 +208,18 @@ def _capture_loop():
     while _running:
         t0 = time.perf_counter()
 
-        frame = cam.get_latest_frame()
-        if frame is None:
-            time.sleep(0.02)
-            continue
+        if use_dxgi and cam is not None:
+            frame = cam.get_latest_frame()
+            if frame is None:
+                time.sleep(0.02)
+                continue
+            curr_bgr = frame
+        else:
+            curr_bgr = _grab_mss()
+            if curr_bgr is None:
+                time.sleep(0.1)
+                continue
 
-        curr_bgr = frame
         with _snapshot_lock:
             _snapshot = curr_bgr.copy()
 
@@ -219,7 +249,11 @@ def _capture_loop():
         elapsed = time.perf_counter() - t0
         time.sleep(max(0, interval - elapsed))
 
-    cam.stop()
+    if use_dxgi and cam is not None:
+        try:
+            cam.stop()
+        except Exception:
+            pass
 
 
 def start(get_audio_rms_fn: Callable[[], float] = lambda: 0.0):

@@ -336,9 +336,16 @@ def tutor_capture_snapshot(
     """
     snap = get_snapshot()
     if snap is None:
-        import dxcam
-        cam = dxcam.create(output_color="BGR")
-        snap = cam.grab()
+        # dxcam may not be available; use mss as fallback
+        try:
+            import mss as _mss
+            import numpy as _np
+            with _mss.MSS() as sct:
+                mon = sct.monitors[1]
+                sct_img = sct.grab(mon)
+                snap = _np.array(sct_img)[:, :, :3]
+        except Exception:
+            snap = None
 
     if snap is None:
         return {"status": "error", "reason": "Could not capture frame"}
