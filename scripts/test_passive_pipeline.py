@@ -75,6 +75,7 @@ TEST_HTML = """<!DOCTYPE html>
 
 RESULT_PATH = "C:/tmp/tutor_test_result.json"
 TUTOR_SERVER_PORT = 8716
+HTML_SERVER_PORT = 8799
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
