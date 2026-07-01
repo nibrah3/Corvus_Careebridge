@@ -183,21 +183,18 @@ def _capture_loop():
 
     import cv2
 
-    # Try DXGI first; fall back to mss if it isn't available or yields no frames
+    # Try DXGI first; probe with grab() (non-blocking) before committing to continuous mode
     cam = None
     use_dxgi = False
     try:
         import dxcam
-        cam = dxcam.create(output_color="BGR")
-        cam.start(target_fps=_CAPTURE_FPS)
-        # Probe: give it one second to produce a frame
-        time.sleep(0.5)
-        probe = cam.get_latest_frame()
+        _probe_cam = dxcam.create(output_color="BGR")
+        probe = _probe_cam.grab()  # returns None quickly if DX surface unavailable
         if probe is not None:
             use_dxgi = True
-        else:
-            cam.stop()
-            cam = None
+            cam = dxcam.create(output_color="BGR")
+            cam.start(target_fps=_CAPTURE_FPS)
+        # _probe_cam is garbage-collected
     except Exception:
         cam = None
 
