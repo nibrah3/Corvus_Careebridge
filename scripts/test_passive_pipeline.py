@@ -234,8 +234,9 @@ def run_tests() -> dict:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=False, args=["--window-size=1280,900"])
                 page = browser.new_page(viewport={"width": 1280, "height": 900})
-                page.goto(test_url)
-                page.wait_for_load_state("networkidle")
+                # wait_until="commit" avoids blocking on audio/video resource loading
+                page.goto(test_url, wait_until="commit", timeout=30000)
+                time.sleep(2)  # let DOM render before interacting
                 ok("browser_open", "page loaded")
 
                 # Allow DXGI to capture navigation frame
