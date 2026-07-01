@@ -14,12 +14,15 @@ Tools:
 """
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import os
 import sys
 import threading
 import time
 from typing import Optional
+
+_GEMINI_TIMEOUT_S = 20.0
 
 sys.path.insert(0, "E:\\Corvus_Careebridge")
 
@@ -70,8 +73,16 @@ def _gemini_analyse_image(image_path: str, prompt: str) -> str:
     try:
         sys.path.insert(0, "E:\\Corvus_Careebridge\\gemini_mcp")
         from _gemini import analyse_image
-        result = analyse_image(image_path, prompt)
+    except Exception as exc:
+        return f"[gemini error: {exc}]"
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(analyse_image, image_path, prompt)
+    ex.shutdown(wait=False)
+    try:
+        result = fut.result(timeout=_GEMINI_TIMEOUT_S)
         return result.get("text", "")
+    except concurrent.futures.TimeoutError:
+        return "[gemini: timed out]"
     except Exception as exc:
         return f"[gemini error: {exc}]"
 
@@ -80,8 +91,16 @@ def _gemini_analyse_video(uri: str, prompt: str) -> str:
     try:
         sys.path.insert(0, "E:\\Corvus_Careebridge\\gemini_mcp")
         from _gemini import analyse_video
-        result = analyse_video(uri, prompt)
+    except Exception as exc:
+        return f"[gemini error: {exc}]"
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(analyse_video, uri, prompt)
+    ex.shutdown(wait=False)
+    try:
+        result = fut.result(timeout=_GEMINI_TIMEOUT_S)
         return result.get("text", "")
+    except concurrent.futures.TimeoutError:
+        return "[gemini: timed out]"
     except Exception as exc:
         return f"[gemini error: {exc}]"
 
