@@ -1,6 +1,9 @@
 """
 OCR wrapper — tries easyocr, falls back gracefully to empty string.
 
+Initialization is done in a background thread at import time so it never
+blocks the server's orchestration loop or tool handlers.
+
 extract_text(image_np)          → str  (from BGR numpy array)
 extract_text_from_bytes(bytes)  → str
 """
@@ -13,17 +16,16 @@ import numpy as np
 
 _lock = threading.Lock()
 _reader = None          # easyocr reader or None
-_backend: str = ""      # "easyocr" | "none"
+_backend: str = "none"
 _init_done = False
 
 
-def _get_reader():
+def _init_reader_bg():
+    """Initialize easyocr in a background thread — never blocks callers."""
     global _reader, _backend, _init_done
-    if _init_done:
-        return _reader
     with _lock:
         if _init_done:
-            return _reader
+            return
         try:
             import easyocr
             _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
@@ -32,12 +34,19 @@ def _get_reader():
             _reader = None
             _backend = "none"
         _init_done = True
-    return _reader
+
+
+# Kick off initialization immediately so it's ready as soon as possible
+_bg_thread = threading.Thread(target=_init_reader_bg, daemon=True)
+_bg_thread.start()
 
 
 def extract_text(image_bgr: np.ndarray) -> str:
-    """Extract text from a BGR numpy array. Returns concatenated text."""
-    reader = _get_reader()
+    """Extract text from a BGR numpy array. Returns '' if OCR not ready yet."""
+    if not _init_done:
+        return ""   # still initializing — don't block
+    with _lock:
+        reader = _reader
     if reader is None:
         return ""
     try:
