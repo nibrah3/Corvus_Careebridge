@@ -68,51 +68,61 @@ def start() -> bool:
     except ImportError:
         return False
 
-    try:
-        pa = pyaudio.PyAudio()
-        wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
-        default_speakers = pa.get_device_info_by_index(
-            wasapi_info["defaultOutputDevice"]
-        )
+    result: list = []
+    init_done = threading.Event()
 
-        if not default_speakers.get("isLoopbackDevice", False):
-            # Find the loopback sibling
-            for i in range(pa.get_device_count()):
-                dev = pa.get_device_info_by_index(i)
-                if (
-                    dev.get("isLoopbackDevice", False)
-                    and default_speakers["name"] in dev["name"]
-                ):
-                    default_speakers = dev
-                    break
+    def _init():
+        global _stream, _pa, _thread, _running, _sample_rate, _channels
+        try:
+            pa = pyaudio.PyAudio()
+            wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+            default_speakers = pa.get_device_info_by_index(
+                wasapi_info["defaultOutputDevice"]
+            )
 
-        sr = int(default_speakers["defaultSampleRate"])
-        ch = int(default_speakers["maxInputChannels"])
-        ch = max(1, ch)
+            if not default_speakers.get("isLoopbackDevice", False):
+                for i in range(pa.get_device_count()):
+                    dev = pa.get_device_info_by_index(i)
+                    if (
+                        dev.get("isLoopbackDevice", False)
+                        and default_speakers["name"] in dev["name"]
+                    ):
+                        default_speakers = dev
+                        break
 
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=ch,
-            rate=sr,
-            input=True,
-            frames_per_buffer=_CHUNK_FRAMES,
-            input_device_index=default_speakers["index"],
-        )
+            sr = int(default_speakers["defaultSampleRate"])
+            ch = max(1, int(default_speakers["maxInputChannels"]))
 
-        _pa = pa
-        _stream = stream
-        _sample_rate = sr
-        _channels = ch
-        _running = True
+            # pa.open() can hang on some WASAPI drivers — runs in this thread
+            # with an 8-second timeout on the caller side.
+            stream = pa.open(
+                format=pyaudio.paInt16,
+                channels=ch,
+                rate=sr,
+                input=True,
+                frames_per_buffer=_CHUNK_FRAMES,
+                input_device_index=default_speakers["index"],
+            )
 
-        _thread = threading.Thread(
-            target=_record_loop, args=(stream, sr, ch), daemon=True
-        )
-        _thread.start()
-        return True
+            _pa = pa
+            _stream = stream
+            _sample_rate = sr
+            _channels = ch
+            _running = True
 
-    except Exception:
-        return False
+            _thread = threading.Thread(
+                target=_record_loop, args=(stream, sr, ch), daemon=True
+            )
+            _thread.start()
+            result.append(True)
+        except Exception:
+            result.append(False)
+        finally:
+            init_done.set()
+
+    threading.Thread(target=_init, daemon=True).start()
+    init_done.wait(timeout=8.0)
+    return bool(result and result[0])
 
 
 def stop():
