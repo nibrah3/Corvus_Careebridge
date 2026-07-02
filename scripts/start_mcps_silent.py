@@ -9,6 +9,11 @@ from pathlib import Path
 CB   = Path(__file__).resolve().parent.parent
 PYW  = Path(sys.executable).parent / "pythonw.exe"
 
+# Servers that live outside Corvus_Careebridge get their own cwd
+SERVER_CWD_OVERRIDES = {
+    "tutor_mcp.server": Path("E:/annotation-tutor"),
+}
+
 SERVERS = [
     ("humanizer_mcp.server",  8701),
     ("capture_mcp.server",    8702),
@@ -50,7 +55,7 @@ for mod, port in SERVERS:
         continue   # already running, skip silently
     subprocess.Popen(
         [str(PYW), "-m", mod, "--http", str(port)],
-        cwd=str(CB),
+        cwd=str(SERVER_CWD_OVERRIDES.get(mod, CB)),
         env=env,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
