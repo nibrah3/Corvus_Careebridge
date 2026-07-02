@@ -24,6 +24,7 @@ SERVERS = [
     ("vps_mcp.server",        8713),
     ("schools_mcp.server",    8714),
     ("ixbrowser_mcp.server",  8715),
+    ("tutor_mcp.server",      8716),
 ]
 
 # Load .env

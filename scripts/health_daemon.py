@@ -83,6 +83,7 @@ SERVERS = [
     ("vps_mcp.server",        8713),
     ("schools_mcp.server",    8714),
     ("ixbrowser_mcp.server",  8715),   # IXBrowser profile manager (added 2026-06)
+    ("tutor_mcp.server",      8716),   # Passive annotation tutor capture server (added 2026-07)
 ]
 
 # ── Logging ───────────────────────────────────────────────────────────────────
