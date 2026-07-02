@@ -360,8 +360,4 @@ def capture_status() -> dict:
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8716)
-    args = parser.parse_args()
-    mcp.run_http(args.port)
+    mcp.run()
