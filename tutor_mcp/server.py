@@ -1,37 +1,34 @@
 """
-Tutor MCP — passive annotation training pipeline.
+Tutor Capture Service — pure sensor layer for Claude Code orchestration.
 
 Port: 8716
-Orchestrates: _capture → _ocr → _session → _assembler → _uploader → Gemini
+Claude Code is the brain — this service has no decision logic.
 
 Tools:
-  tutor_start_session()         — begin passive monitoring
-  tutor_stop_session()          — stop monitoring, save session.md
-  tutor_get_context()           — return current session.md content
-  tutor_ask_gemini(question)    — ask Gemini about buffered video/session context
-  tutor_capture_snapshot()      — one-shot screenshot + OCR for immediate analysis
-  tutor_status()                — return current session state
+  capture_start(session_id)  — begin DXGI + WASAPI capture
+  capture_stop()             — stop capture, flush pending clip
+  capture_get_event(timeout) — pop next processed event for Claude to reason over
+  capture_get_snapshot()     — on-demand frame + OCR
+  capture_audio_rms()        — current WASAPI RMS
+  capture_get_clip_uri()     — latest Gemini-uploaded clip URI
+  capture_status()           — service health
 """
 from __future__ import annotations
 
-import concurrent.futures
-import io
 import os
+import queue
 import sys
 import threading
 import time
 from typing import Optional
-
-_GEMINI_TIMEOUT_S = 20.0
 
 sys.path.insert(0, "E:\\Corvus_Careebridge")
 
 from _minmcp import MinMCP
 
 from ._audio import start as _audio_start, stop as _audio_stop, get_rms, get_window
-from ._capture import start as _cap_start, stop as _cap_stop, get_event, get_snapshot, FrameEvent
+from ._capture import start as _cap_start, stop as _cap_stop, get_event as _cap_get_event, get_snapshot, FrameEvent
 from ._ocr import extract_text
-from ._session import SessionDoc
 from ._assembler import assemble_clip
 from ._uploader import BackgroundUploader
 
@@ -40,26 +37,31 @@ mcp = MinMCP("tutor")
 _BASE_DIR = "E:/Corvus_Careebridge/tutor_mcp"
 _CLIPS_DIR = f"{_BASE_DIR}/clips"
 _FRAMES_DIR = f"{_BASE_DIR}/frames"
-_SESSION_DIR = f"{_BASE_DIR}/sessions"
 
 os.makedirs(_CLIPS_DIR, exist_ok=True)
 os.makedirs(_FRAMES_DIR, exist_ok=True)
-os.makedirs(_SESSION_DIR, exist_ok=True)
 
-# ── Session state ─────────────────────────────────────────────────────────────
+# ── Module state ──────────────────────────────────────────────────────────────
 
-_session: Optional[SessionDoc] = None
-_session_lock = threading.Lock()
-_orch_thread: Optional[threading.Thread] = None
 _running = False
 _uploader = BackgroundUploader()
 
-# Video clip buffering
-_video_frames: list = []        # [(bgr_array, ts), ...]
+# Processed event queue — what Claude reads from via capture_get_event()
+_out_queue: queue.Queue = queue.Queue(maxsize=200)
+
+# Video clip buffering (written/read only by _event_processor thread except
+# _latest_clip_path which is also read by capture_get_clip_uri HTTP handler)
+_video_frames: list = []
 _video_start_ts: float = 0.0
 _video_last_ts: float = 0.0
-_VIDEO_GAP_S = 1.5              # silence gap → end of video event
+_VIDEO_GAP_S = 1.5
+_latest_clip_path: Optional[str] = None
+_state_lock = threading.Lock()
 
+_processor_thread: Optional[threading.Thread] = None
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _save_frame_jpeg(bgr, label: str) -> str:
     import cv2
@@ -69,164 +71,146 @@ def _save_frame_jpeg(bgr, label: str) -> str:
     return path
 
 
-def _gemini_analyse_image(image_path: str, prompt: str) -> str:
-    try:
-        sys.path.insert(0, "E:\\Corvus_Careebridge\\gemini_mcp")
-        from _gemini import analyse_image
-    except Exception as exc:
-        return f"[gemini error: {exc}]"
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(analyse_image, image_path, prompt)
-    ex.shutdown(wait=False)
-    try:
-        result = fut.result(timeout=_GEMINI_TIMEOUT_S)
-        return result.get("text", "")
-    except concurrent.futures.TimeoutError:
-        return "[gemini: timed out]"
-    except Exception as exc:
-        return f"[gemini error: {exc}]"
+def _flush_video_clip():
+    """Assemble buffered video frames into a clip and enqueue for Gemini upload."""
+    global _video_frames, _video_start_ts, _latest_clip_path
 
-
-def _gemini_analyse_video(uri: str, prompt: str) -> str:
-    try:
-        sys.path.insert(0, "E:\\Corvus_Careebridge\\gemini_mcp")
-        from _gemini import analyse_video
-    except Exception as exc:
-        return f"[gemini error: {exc}]"
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(analyse_video, uri, prompt)
-    ex.shutdown(wait=False)
-    try:
-        result = fut.result(timeout=_GEMINI_TIMEOUT_S)
-        return result.get("text", "")
-    except concurrent.futures.TimeoutError:
-        return "[gemini: timed out]"
-    except Exception as exc:
-        return f"[gemini error: {exc}]"
-
-
-def _flush_video_clip(session: SessionDoc):
-    """Assemble buffered video frames + audio into a clip and upload."""
-    global _video_frames, _video_start_ts, _video_last_ts
-
-    frames = list(_video_frames)
-    _video_frames = []
+    with _state_lock:
+        frames = list(_video_frames)
+        start_ts = _video_start_ts
+        last_ts = _video_last_ts
+        _video_frames = []
 
     if len(frames) < 5:
         return
 
-    clip_ts = _video_start_ts
-    clip_name = f"clip_{time.strftime('%H%M%S', time.localtime(clip_ts))}.mp4"
+    clip_name = f"clip_{time.strftime('%H%M%S', time.localtime(start_ts))}.mp4"
     clip_path = f"{_CLIPS_DIR}/{clip_name}"
-
-    audio_chunks = get_window(_video_start_ts - 0.5, _video_last_ts + 0.5)
+    audio_chunks = get_window(start_ts - 0.5, last_ts + 0.5)
 
     try:
         assemble_clip(frames, audio_chunks, clip_path)
         _uploader.enqueue(clip_path)
-        session.add_video_ref(clip_ts, clip_path)
-        session.add_note(time.time(), f"Video clip assembled ({len(frames)} frames) — uploading to Gemini")
+        with _state_lock:
+            _latest_clip_path = clip_path
+        try:
+            _out_queue.put_nowait({
+                "kind": "video_end",
+                "timestamp": last_ts,
+                "clip_path": clip_path,
+                "frame_count": len(frames),
+                "duration_s": round(last_ts - start_ts, 1),
+            })
+        except queue.Full:
+            pass
     except Exception as exc:
-        session.add_note(time.time(), f"Clip assembly failed: {exc}")
+        try:
+            _out_queue.put_nowait({
+                "kind": "video_end",
+                "timestamp": last_ts,
+                "clip_path": None,
+                "error": str(exc),
+            })
+        except queue.Full:
+            pass
 
 
-def _orchestrate():
-    """Main event loop — consumes _capture events and builds session.md."""
+def _event_processor():
+    """Read raw capture events, buffer video, emit processed events to _out_queue."""
     global _video_frames, _video_start_ts, _video_last_ts, _running
 
-    with _session_lock:
-        session = _session
-
-    if session is None:
-        return
-
-    last_video_event_ts = 0.0
-
     while _running:
-        event: Optional[FrameEvent] = get_event(timeout=0.5)
+        # Flush video clip if silence gap exceeded
+        with _state_lock:
+            has_video = bool(_video_frames)
+            last_ts = _video_last_ts
+        if has_video and (time.time() - last_ts) > _VIDEO_GAP_S:
+            _flush_video_clip()
+            continue
 
-        # Check if a video event timed out (gap > threshold)
-        if _video_frames:
-            gap = time.time() - _video_last_ts
-            if gap > _VIDEO_GAP_S:
-                _flush_video_clip(session)
-
+        event: Optional[FrameEvent] = _cap_get_event(timeout=0.5)
         if event is None:
             continue
 
-        if event.kind == "navigation":
-            if event.frame_bgr is not None:
-                img_path = _save_frame_jpeg(event.frame_bgr, "nav")
-                ocr_text = extract_text(event.frame_bgr)
-                analysis = _gemini_analyse_image(
-                    img_path,
-                    "Extract all visible text on this screen. Identify: "
-                    "page type (question/instructions/video/other), "
-                    "any question text and answer options, "
-                    "any instructions visible. Be concise.",
-                )
-                session.add_navigation(event.timestamp, ocr_text, img_path, analysis)
+        if event.kind == "navigation" and event.frame_bgr is not None:
+            frame_path = _save_frame_jpeg(event.frame_bgr, "nav")
+            ocr_text = extract_text(event.frame_bgr)
+            try:
+                _out_queue.put_nowait({
+                    "kind": "navigation",
+                    "timestamp": event.timestamp,
+                    "frame_path": frame_path,
+                    "ocr_text": ocr_text,
+                })
+            except queue.Full:
+                pass
 
-        elif event.kind == "scroll":
-            if event.scroll_strip is not None:
-                ocr_text = extract_text(event.scroll_strip)
-                if ocr_text.strip():
-                    session.add_scroll_content(event.timestamp, ocr_text)
+        elif event.kind == "scroll" and event.scroll_strip is not None:
+            ocr_text = extract_text(event.scroll_strip)
+            if ocr_text.strip():
+                try:
+                    _out_queue.put_nowait({
+                        "kind": "scroll",
+                        "timestamp": event.timestamp,
+                        "ocr_text": ocr_text,
+                    })
+                except queue.Full:
+                    pass
 
-        elif event.kind == "video_playing":
-            if event.frame_bgr is not None:
+        elif event.kind == "video_playing" and event.frame_bgr is not None:
+            with _state_lock:
                 _video_frames.append((event.frame_bgr.copy(), event.timestamp))
-                if not _video_frames or len(_video_frames) == 1:
+                if len(_video_frames) == 1:
                     _video_start_ts = event.timestamp
                 _video_last_ts = event.timestamp
 
-        # ui_interaction and static are discarded (correct behaviour)
+        # static and ui_interaction events are discarded
 
+
+# ── MCP Tools ─────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def tutor_start_session(session_id: str = "") -> dict:
+def capture_start(session_id: str = "") -> dict:
     """
-    Start passive screen + audio monitoring session.
+    Start DXGI screen capture and WASAPI audio capture.
 
-    Begins WASAPI loopback audio capture and DXGI frame capture.
-    All captured content accumulates in session.md in real time.
+    Call this once at the beginning of a session, before navigating to the
+    annotation site. Claude Code then polls capture_get_event() in a loop
+    to receive classified events (navigation, scroll, video_end).
 
-    Args:
-        session_id: Optional label for this session (default: timestamp).
-
-    Returns status dict with session_id.
+    Returns: {status, session_id, audio_capture}
     """
-    global _session, _orch_thread, _running
+    global _running, _processor_thread, _video_frames, _latest_clip_path, _out_queue
 
-    with _session_lock:
-        if _running:
-            return {"status": "already_running", "session_id": _session._id if _session else ""}
+    if _running:
+        return {"status": "already_running"}
 
-        sid = session_id or time.strftime("%Y%m%d_%H%M%S")
-        _session = SessionDoc(sid)
-        _running = True
+    # Reset state for new session
+    with _state_lock:
+        _video_frames = []
+        _latest_clip_path = None
+    # Drain any leftover events from previous session
+    _out_queue = queue.Queue(maxsize=200)
+
+    sid = session_id or time.strftime("%Y%m%d_%H%M%S")
+    _running = True
 
     audio_ok = _audio_start()
     _uploader.start()
     _cap_start(get_rms)
 
-    _orch_thread = threading.Thread(target=_orchestrate, daemon=True)
-    _orch_thread.start()
+    _processor_thread = threading.Thread(target=_event_processor, daemon=True, name="tutor-processor")
+    _processor_thread.start()
 
-    return {
-        "status": "started",
-        "session_id": sid,
-        "audio_capture": audio_ok,
-        "session_dir": _SESSION_DIR,
-    }
+    return {"status": "started", "session_id": sid, "audio_capture": audio_ok}
 
 
 @mcp.tool()
-def tutor_stop_session() -> dict:
+def capture_stop() -> dict:
     """
-    Stop passive monitoring and save session.md.
+    Stop all capture. Flushes any buffered video clip before stopping.
 
-    Returns path to the saved session document and summary stats.
+    Returns: {status, clips_completed}
     """
     global _running
 
@@ -234,132 +218,69 @@ def tutor_stop_session() -> dict:
         return {"status": "not_running"}
 
     _running = False
-
     _cap_stop()
     _audio_stop()
+
+    if _processor_thread is not None:
+        _processor_thread.join(timeout=3)
+
+    # Flush any remaining video buffer
+    with _state_lock:
+        has_video = bool(_video_frames)
+    if has_video:
+        _flush_video_clip()
+
     _uploader.stop()
 
-    with _session_lock:
-        session = _session
-
-    if session is None:
-        return {"status": "stopped", "entries": 0}
-
-    if _video_frames:
-        _flush_video_clip(session)
-
-    session_path = f"{_SESSION_DIR}/{session._id}.md"
-    session.save(session_path)
-
-    return {
-        "status": "stopped",
-        "session_id": session._id,
-        "entries": session.entry_count(),
-        "size_kb": round(session.size_kb(), 1),
-        "session_path": session_path,
-    }
+    clips_done = sum(
+        1 for info in _uploader._cache.values()
+        if info.get("state") == "ACTIVE"
+    )
+    return {"status": "stopped", "clips_completed": clips_done}
 
 
 @mcp.tool()
-def tutor_get_context() -> dict:
+def capture_get_event(timeout_s: float = 2.0) -> dict:
     """
-    Return the current session.md content for Claude to reason over.
+    Pop the next processed capture event from the queue.
 
-    Use this to get full context before answering a worker's question.
-    Content includes OCR text from all navigated pages, Gemini analysis
-    of screenshots, and transcriptions of any video clips processed so far.
+    Event kinds:
+      navigation — major page change; frame_path (JPEG) and ocr_text provided.
+                   Pass frame_path to mcp__gemini__analyse_image to get content analysis.
+      scroll     — new content scrolled into view; ocr_text of the revealed strip.
+      video_end  — a video clip was assembled; clip_path provided.
+                   Use capture_get_clip_uri() to check when it's ACTIVE for Gemini.
+      none       — queue was empty within timeout_s.
+
+    Call this in a reasoning loop: get_event → reason → repeat.
+
+    Returns: {kind, timestamp, ...kind-specific fields}
     """
-    with _session_lock:
-        session = _session
-
-    if session is None:
-        return {"status": "no_session", "content": ""}
-
-    content = session.to_markdown()
-    return {
-        "status": "ok",
-        "session_id": session._id,
-        "entries": session.entry_count(),
-        "size_kb": round(len(content.encode()) / 1024, 1),
-        "content": content,
-    }
-
-
-@mcp.tool()
-def tutor_ask_gemini(
-    question: str,
-    use_latest_clip: bool = True,
-) -> dict:
-    """
-    Ask Gemini a question about the current session context.
-
-    If use_latest_clip=True and a recently uploaded clip is available,
-    Gemini receives the video + question together (multimodal).
-    Otherwise uses the session.md text context.
-
-    Args:
-        question: The question to ask Gemini.
-        use_latest_clip: Whether to include the latest video clip (default True).
-
-    Returns: Gemini's response text.
-    """
-    with _session_lock:
-        session = _session
-
-    if session is None:
-        return {"status": "no_session", "answer": "No active session."}
-
-    # Try to find the latest uploaded clip URI
-    clip_uri = None
-    if use_latest_clip:
-        for path, info in reversed(list(_uploader._cache.items())):
-            if info.get("state") == "ACTIVE":
-                clip_uri = info.get("uri")
-                break
-
     try:
-        sys.path.insert(0, "E:\\Corvus_Careebridge\\gemini_mcp")
-        from _gemini import analyse_video, analyse_image
-
-        if clip_uri:
-            result = analyse_video(clip_uri, question)
-        else:
-            # Fallback: snapshot + question
-            snap = get_snapshot()
-            if snap is not None:
-                snap_path = _save_frame_jpeg(snap, "query")
-                result = analyse_image(snap_path, question)
-            else:
-                return {"status": "no_content", "answer": "No video or snapshot available."}
-
-        return {"status": "ok", "answer": result.get("text", ""), "model": result.get("model", "")}
-
-    except Exception as exc:
-        return {"status": "error", "answer": str(exc)}
+        return _out_queue.get(timeout=timeout_s)
+    except queue.Empty:
+        return {"kind": "none"}
 
 
 @mcp.tool()
-def tutor_capture_snapshot(
-    prompt: str = "Describe what is on screen. Extract any question text, instructions, or answer options.",
-) -> dict:
+def capture_get_snapshot() -> dict:
     """
-    Take an immediate screenshot, run OCR, and ask Gemini to describe it.
+    Capture the current screen on demand via DXGI (or mss fallback) and run OCR.
 
-    Use this when the worker asks about what's currently on screen or
-    needs instant analysis of the current page state.
+    Use when you need to inspect current screen state between events, or to
+    verify what the screen shows before answering a question.
 
-    Args:
-        prompt: Question or instruction for Gemini analysis.
+    To get Gemini's analysis of the snapshot, pass frame_path to
+    mcp__gemini__analyse_image with your prompt.
 
-    Returns: dict with ocr_text, gemini_analysis, image_path.
+    Returns: {frame_path, ocr_text} or {error, frame_path: null, ocr_text: ""}
     """
     snap = get_snapshot()
     if snap is None:
-        # dxcam may not be available; use mss as fallback
         try:
             import mss as _mss
             import numpy as _np
-            with _mss.MSS() as sct:
+            with _mss.mss() as sct:
                 mon = sct.monitors[1]
                 sct_img = sct.grab(mon)
                 snap = _np.array(sct_img)[:, :, :3]
@@ -367,54 +288,74 @@ def tutor_capture_snapshot(
             snap = None
 
     if snap is None:
-        return {"status": "error", "reason": "Could not capture frame"}
+        return {"error": "capture_unavailable", "frame_path": None, "ocr_text": ""}
 
-    img_path = _save_frame_jpeg(snap, "snapshot")
+    frame_path = _save_frame_jpeg(snap, "snapshot")
     ocr_text = extract_text(snap)
-    analysis = _gemini_analyse_image(img_path, prompt)
+    return {"frame_path": frame_path, "ocr_text": ocr_text}
 
-    with _session_lock:
-        session = _session
-    if session:
-        session.add_image_region(time.time(), img_path, analysis)
 
+@mcp.tool()
+def capture_audio_rms() -> dict:
+    """
+    Return the current WASAPI loopback audio RMS level (0.0–1.0).
+
+    Values above ~0.01 indicate audio is playing.
+    Use to confirm whether a video is currently producing sound before
+    deciding if capture_get_clip_uri() will have a useful clip.
+
+    Returns: {rms}
+    """
+    return {"rms": round(get_rms(), 4)}
+
+
+@mcp.tool()
+def capture_get_clip_uri() -> dict:
+    """
+    Return the Gemini File API URI for the latest assembled video clip.
+
+    State values:
+      ACTIVE    — clip is ready; pass uri to mcp__gemini__analyse_video
+      uploading — still uploading to Gemini; retry in a few seconds
+      queued    — waiting to start upload
+      none      — no clip assembled yet this session
+
+    Returns: {uri, state, clip_path}
+    """
+    with _state_lock:
+        clip_path = _latest_clip_path
+
+    if clip_path is None:
+        return {"uri": None, "state": "none", "clip_path": None}
+
+    info = _uploader.get_info(clip_path)
     return {
-        "status": "ok",
-        "image_path": img_path,
-        "ocr_text": ocr_text,
-        "gemini_analysis": analysis,
+        "uri": info.get("uri"),
+        "state": info.get("state", "unknown"),
+        "clip_path": clip_path,
     }
 
 
 @mcp.tool()
-def tutor_status() -> dict:
+def capture_status() -> dict:
     """
-    Return current tutor session state.
+    Return current service health.
 
-    Shows whether session is active, entry count, audio/capture status,
-    pending uploads, and current audio RMS level.
+    Returns: {running, queue_depth, video_buffer_frames, clips_pending, clips_ready, audio_rms}
     """
-    with _session_lock:
-        session = _session
+    with _state_lock:
+        buf_frames = len(_video_frames)
 
-    pending_uploads = sum(
-        1 for info in _uploader._cache.values()
-        if info.get("state") in ("queued", "uploading")
-    )
-    completed_uploads = sum(
-        1 for info in _uploader._cache.values()
-        if info.get("state") == "ACTIVE"
-    )
+    pending = sum(1 for i in _uploader._cache.values() if i.get("state") in ("queued", "uploading"))
+    ready = sum(1 for i in _uploader._cache.values() if i.get("state") == "ACTIVE")
 
     return {
         "running": _running,
-        "session_id": session._id if session else None,
-        "entries": session.entry_count() if session else 0,
-        "size_kb": round(session.size_kb(), 1) if session else 0,
+        "queue_depth": _out_queue.qsize(),
+        "video_buffer_frames": buf_frames,
+        "clips_pending": pending,
+        "clips_ready": ready,
         "audio_rms": round(get_rms(), 4),
-        "video_buffer_frames": len(_video_frames),
-        "uploads_pending": pending_uploads,
-        "uploads_completed": completed_uploads,
     }
 
 
