@@ -32,6 +32,12 @@ from pathlib import Path
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CB_DIR  = Path(os.environ.get("CB_DIR", Path(__file__).resolve().parent.parent))
+ANNOT_DIR = Path("E:/annotation-tutor")
+
+# Servers that live outside Corvus_Careebridge get their own cwd
+SERVER_CWD_OVERRIDES: dict[str, Path] = {
+    "tutor_mcp.server": ANNOT_DIR,
+}
 PYTHON  = Path(os.environ.get("CB_PYTHON", "C:/Python314/pythonw.exe"))
 LOG     = CB_DIR / "logs" / "health.log"
 DB      = CB_DIR / "careerbridge.db"
@@ -216,9 +222,10 @@ def _is_up(port: int) -> bool:
 # ── Process restart ───────────────────────────────────────────────────────────
 
 def _start_server(mod: str, port: int) -> None:
+    cwd = SERVER_CWD_OVERRIDES.get(mod, CB_DIR)
     subprocess.Popen(
         [str(PYTHON), "-m", mod, "--http", str(port)],
-        cwd=str(CB_DIR),
+        cwd=str(cwd),
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
