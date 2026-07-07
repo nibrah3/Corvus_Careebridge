@@ -1,61 +1,63 @@
-"""Find direct video download links on Wikimedia Commons."""
+"""Test video extraction on YouTube (uses HTML5 <video> element)."""
 import sys, time
 sys.path.insert(0, r"E:\Corvus_Careebridge")
 from playwright.sync_api import sync_playwright
 from careerbridge.cdp_executor import CDPExecutor
 
-URL = "https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_4_seconds_bird_clip.ogv"
+# First YouTube video ever uploaded — short, public, no age restriction
+URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, args=[
         "--remote-debugging-port=9222", "--no-first-run",
         "--disable-extensions",
+        "--autoplay-policy=no-user-gesture-required",
     ])
     page = browser.new_page()
     print(f"Navigating: {URL}")
-    page.goto(URL, wait_until="networkidle")
-    time.sleep(5)
+    page.goto(URL, wait_until="domcontentloaded")
+    time.sleep(5)  # YouTube JS player needs time to initialize
 
     cdp = CDPExecutor()
     cdp.connect(port=9222)
 
-    # Look for all anchor hrefs that contain video file extensions
-    video_links = cdp.eval_js("""
-        Array.from(document.querySelectorAll('a[href]'))
-            .map(function(a){ return a.href; })
-            .filter(function(h){
-                return /\\.(ogv|webm|mp4|ogg|avi|mov)(\\?|$)/i.test(h)
-                    || /upload\\.wikimedia\\.org.*\\.(ogv|webm|mp4)/i.test(h);
-            })
-            .slice(0, 10)
-    """) or []
-    print("Direct video links:", video_links)
+    # Extract video title
+    title = cdp.eval_js("""
+        (function(){
+            var el = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, h1.title, h1');
+            return el ? el.innerText.trim() : '';
+        })()
+    """) or ""
+    print(f"Title : {title!r}")
 
-    # Also check the mw-filepage-filelinks section
-    file_links = cdp.eval_js("""
-        Array.from(document.querySelectorAll('.fullMedia a, .mw-filepage-other-resolutions a, #mw-filepage-content a'))
-            .map(function(a){ return a.href; })
-            .filter(function(h){ return h.includes('upload.wikimedia'); })
-            .slice(0, 5)
-    """) or []
-    print("File section links:", file_links)
-
-    # Scroll down and trigger video player
-    page.evaluate("window.scrollTo(0, 300)")
-    time.sleep(2)
-
-    # Re-check video elements after scroll
-    vids = cdp.eval_js("""
+    # Extract video element
+    vstate = cdp.eval_js("""
         (function(){
             var v = document.querySelector('video');
             if (!v) return {found: false};
-            var sources = Array.from(v.querySelectorAll('source')).map(function(s){
-                return {src: s.src || s.getAttribute('src'), type: s.type};
-            });
-            return {found: true, src: v.src, currentSrc: v.currentSrc, sources: sources};
+            return {
+                found: true,
+                src: v.src || '',
+                currentSrc: v.currentSrc || '',
+                readyState: v.readyState,
+                duration: v.duration
+            };
         })()
-    """)
-    print("Video element state:", vids)
+    """) or {}
+    print(f"Video : {vstate}")
+
+    # Extract OG metadata (thumbnail, title)
+    og = cdp.eval_js("""
+        (function(){
+            var img = document.querySelector('meta[property=\"og:image\"]');
+            var ttl = document.querySelector('meta[property=\"og:title\"]');
+            return {
+                thumbnail: img ? img.content : '',
+                title: ttl ? ttl.content : ''
+            };
+        })()
+    """) or {}
+    print(f"OG    : {og}")
 
     cdp.disconnect()
     time.sleep(1)
