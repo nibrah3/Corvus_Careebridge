@@ -30,7 +30,7 @@ _DIRECT_MODEL    = os.environ.get("GEMINI_DIRECT_MODEL", "gemini-2.5-flash")
 _IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-2.5-flash")
 
 _MAX_RETRIES      = 3
-_MAX_RETRY_DELAY  = 90.0   # seconds — above this assume daily quota, don't retry
+_MAX_RETRY_DELAY  = 120.0  # seconds — above this give up retrying
 
 
 def _parse_retry_delay(err: Exception) -> float:
