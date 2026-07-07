@@ -1,4 +1,4 @@
-"""Debug: inspect video/source element attributes on Wikimedia Commons."""
+"""Find direct video download links on Wikimedia Commons."""
 import sys, time
 sys.path.insert(0, r"E:\Corvus_Careebridge")
 from playwright.sync_api import sync_playwright
@@ -12,43 +12,50 @@ with sync_playwright() as p:
         "--disable-extensions",
     ])
     page = browser.new_page()
-    print(f"Navigating to: {URL}")
+    print(f"Navigating: {URL}")
     page.goto(URL, wait_until="networkidle")
-    time.sleep(4)
+    time.sleep(5)
 
     cdp = CDPExecutor()
     cdp.connect(port=9222)
 
-    # Inspect all attributes on source elements
-    attrs = cdp.eval_js("""
-        Array.from(document.querySelectorAll('source')).map(function(s){
-            var out = {};
-            for (var i=0; i<s.attributes.length; i++) {
-                out[s.attributes[i].name] = s.attributes[i].value;
-            }
-            return out;
-        })
-    """) or []
-    print("SOURCE attributes:", attrs)
-
-    # Also look for any text containing upload.wikimedia.org
-    hrefs = cdp.eval_js("""
-        Array.from(document.querySelectorAll('[href*="upload.wikimedia"], [src*="upload.wikimedia"]'))
-            .map(function(el){ return el.href || el.src; })
-            .filter(function(u){ return !!u; })
+    # Look for all anchor hrefs that contain video file extensions
+    video_links = cdp.eval_js("""
+        Array.from(document.querySelectorAll('a[href]'))
+            .map(function(a){ return a.href; })
+            .filter(function(h){
+                return /\\.(ogv|webm|mp4|ogg|avi|mov)(\\?|$)/i.test(h)
+                    || /upload\\.wikimedia\\.org.*\\.(ogv|webm|mp4)/i.test(h);
+            })
             .slice(0, 10)
     """) or []
-    print("Wikimedia upload URLs:", hrefs)
+    print("Direct video links:", video_links)
 
-    # Check page HTML for video URL patterns
-    video_in_html = cdp.eval_js("""
-        (function(){
-            var html = document.body.innerHTML;
-            var match = html.match(/https?:[^"'\\s]+\\.(?:webm|ogv|mp4|ogg)[^"'\\s]*/g);
-            return match ? match.slice(0,5) : [];
-        })()
+    # Also check the mw-filepage-filelinks section
+    file_links = cdp.eval_js("""
+        Array.from(document.querySelectorAll('.fullMedia a, .mw-filepage-other-resolutions a, #mw-filepage-content a'))
+            .map(function(a){ return a.href; })
+            .filter(function(h){ return h.includes('upload.wikimedia'); })
+            .slice(0, 5)
     """) or []
-    print("Video URL patterns in HTML:", video_in_html)
+    print("File section links:", file_links)
+
+    # Scroll down and trigger video player
+    page.evaluate("window.scrollTo(0, 300)")
+    time.sleep(2)
+
+    # Re-check video elements after scroll
+    vids = cdp.eval_js("""
+        (function(){
+            var v = document.querySelector('video');
+            if (!v) return {found: false};
+            var sources = Array.from(v.querySelectorAll('source')).map(function(s){
+                return {src: s.src || s.getAttribute('src'), type: s.type};
+            });
+            return {found: true, src: v.src, currentSrc: v.currentSrc, sources: sources};
+        })()
+    """)
+    print("Video element state:", vids)
 
     cdp.disconnect()
     time.sleep(1)
