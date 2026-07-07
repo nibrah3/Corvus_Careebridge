@@ -66,7 +66,7 @@ def upload_video(video_path: str) -> dict:
         return {"error": str(exc)}
 
 
-def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.0-flash") -> dict:
+def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash") -> dict:
     """
     Send a previously uploaded video to Gemini with a prompt.
 
