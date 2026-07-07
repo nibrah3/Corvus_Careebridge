@@ -248,4 +248,8 @@ def test_annotation_pipeline_cdp(http_server):
         cdp.disconnect()
     finally:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
