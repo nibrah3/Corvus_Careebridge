@@ -25,9 +25,21 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 _OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
-_GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
 _DIRECT_MODEL    = os.environ.get("GEMINI_DIRECT_MODEL", "gemini-2.5-flash")
 _IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-2.5-flash")
+
+
+def _load_gemini_key() -> str:
+    """Read GEMINI_API_KEY from .env at call time (survives key rotation)."""
+    import pathlib
+    env_file = pathlib.Path(__file__).parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.startswith("GEMINI_API_KEY="):
+                key = line.split("=", 1)[1].strip()
+                if key:
+                    return key
+    return os.environ.get("GEMINI_API_KEY", "")
 
 
 # ── Image annotation ──────────────────────────────────────────────────────────
@@ -44,7 +56,7 @@ def annotate_image(
     Primary: direct Gemini API (GEMINI_API_KEY) — Gemini fetches the URL itself.
     Fallback: OpenRouter inline image_url.
     """
-    if _GEMINI_API_KEY:
+    if _load_gemini_key():
         try:
             return _image_direct_url(image_url, question, options, context)
         except Exception as e:
@@ -66,7 +78,7 @@ def annotate_image_b64(
     Primary: direct Gemini API (GEMINI_API_KEY) — Part.from_bytes, no size limit.
     Fallback: OpenRouter data-URI inline.
     """
-    if _GEMINI_API_KEY:
+    if _load_gemini_key():
         try:
             return _image_direct_b64(image_b64, mime_type, question, options, context)
         except Exception as e:

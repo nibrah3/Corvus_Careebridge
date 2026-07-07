@@ -89,7 +89,7 @@ def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash") -
         return {"error": str(exc)}
 
 
-def analyse_image(image_path: str, prompt: str, model: str = "gemini-2.0-flash") -> dict:
+def analyse_image(image_path: str, prompt: str, model: str = "gemini-2.5-flash") -> dict:
     """
     Send a local image file to Gemini inline (no upload needed for images).
 
