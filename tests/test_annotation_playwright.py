@@ -168,9 +168,13 @@ def test_annotation_pipeline_cdp(http_server):
 
     Launches a separate Chromium process (not Playwright-managed) with
     --remote-debugging-port=9223 so CDPExecutor can attach without conflict.
-    Then runs _extract_generic() and verifies the extracted fields.
+    Uses a fresh temp profile dir each run to avoid Chrome's singleton lock
+    blocking startup when another Chrome is already running.
     """
     import subprocess
+    import tempfile
+    import shutil
+    import socket as _socket
     from careerbridge.cdp_executor import CDPExecutor, CDPError
 
     chromium = (
@@ -180,11 +184,13 @@ def test_annotation_pipeline_cdp(http_server):
     if not Path(chromium).exists():
         pytest.skip(f"Playwright Chromium not found at {chromium}")
 
+    # Fresh profile dir each run — no stale SingletonLock from prior crashed runs
+    tmp_profile = tempfile.mkdtemp(prefix="cdp-test-")
     proc = subprocess.Popen(
         [
             chromium,
             "--remote-debugging-port=9223",
-            "--user-data-dir=C:/tmp/annotation-test-profile",
+            f"--user-data-dir={tmp_profile}",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-extensions",
@@ -195,9 +201,8 @@ def test_annotation_pipeline_cdp(http_server):
         stderr=subprocess.DEVNULL,
     )
     try:
-        # Poll until the CDP port accepts connections (up to 20s)
-        import socket as _socket
-        deadline = time.time() + 20.0
+        # Poll until the CDP port accepts connections (up to 30s)
+        deadline = time.time() + 30.0
         while time.time() < deadline:
             try:
                 with _socket.create_connection(("127.0.0.1", 9223), timeout=0.5):
@@ -205,7 +210,7 @@ def test_annotation_pipeline_cdp(http_server):
             except OSError:
                 time.sleep(0.3)
         else:
-            pytest.fail("Chromium CDP port 9223 never became available (20s timeout)")
+            pytest.fail("Chromium CDP port 9223 never became available (30s timeout)")
 
         cdp = CDPExecutor()
         cdp.connect(port=9223)
@@ -253,3 +258,4 @@ def test_annotation_pipeline_cdp(http_server):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        shutil.rmtree(tmp_profile, ignore_errors=True)
