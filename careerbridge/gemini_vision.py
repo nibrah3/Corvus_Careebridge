@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,19 @@ log = logging.getLogger(__name__)
 _OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
 _DIRECT_MODEL    = os.environ.get("GEMINI_DIRECT_MODEL", "gemini-2.5-flash")
 _IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-2.5-flash")
+
+_MAX_RETRIES      = 3
+_MAX_RETRY_DELAY  = 90.0   # seconds — above this assume daily quota, don't retry
+
+
+def _parse_retry_delay(err: Exception) -> float:
+    """Extract retryDelay seconds from a Gemini 429 error string."""
+    m = re.search(r"retryDelay['\"\s:]+(\d+(?:\.\d+)?)s", str(err))
+    return float(m.group(1)) if m else 0.0
+
+
+def _is_daily_quota(err: Exception) -> bool:
+    return bool(re.search(r"Per(?:Day|24Hour|Daily)|FreeTier", str(err), re.IGNORECASE))
 
 
 def _load_gemini_key() -> str:
