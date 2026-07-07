@@ -29,8 +29,10 @@ _OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
 _DIRECT_MODEL    = os.environ.get("GEMINI_DIRECT_MODEL", "gemini-2.5-flash")
 _IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-2.5-flash")
 
-_MAX_RETRIES      = 3
+_MAX_RETRIES      = 2
 _MAX_RETRY_DELAY  = 120.0  # seconds — above this give up retrying
+# When primary model hits daily quota, try these in order
+_FALLBACK_MODELS  = ["gemini-2.0-flash", "gemini-1.5-flash"]
 
 
 def _parse_retry_delay(err: Exception) -> float:
@@ -156,24 +158,31 @@ def _image_direct_b64(
     client    = _gemini_client()
     img_bytes = base64.b64decode(image_b64)
     prompt    = _build_prompt(question, options, context)
+    models = [_DIRECT_MODEL] + _FALLBACK_MODELS
     last_err: Exception = RuntimeError("no attempt made")
-    for attempt in range(1, _MAX_RETRIES + 1):
-        try:
-            resp = client.models.generate_content(
-                model=_DIRECT_MODEL,
-                contents=[types.Part.from_bytes(data=img_bytes, mime_type=mime_type), prompt],
-            )
-            raw = (resp.text or "").strip()
-            log.debug("Direct Gemini b64 image raw: %r", raw)
-            return _match_option(raw, options)
-        except Exception as e:
-            last_err = e
-            delay = _parse_retry_delay(e)
-            if delay > 0 and delay <= _MAX_RETRY_DELAY and attempt < _MAX_RETRIES:
-                log.warning("Gemini 429 (attempt %d/%d), waiting %.0fs...", attempt, _MAX_RETRIES, delay)
-                time.sleep(delay + 2.0)
-                continue
-            raise
+    for model in models:
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=[types.Part.from_bytes(data=img_bytes, mime_type=mime_type), prompt],
+                )
+                raw = (resp.text or "").strip()
+                if model != _DIRECT_MODEL:
+                    log.info("Answered via fallback model %s: %r", model, raw)
+                log.debug("Gemini raw (%s): %r", model, raw)
+                return _match_option(raw, options)
+            except Exception as e:
+                last_err = e
+                if _is_daily_quota(e):
+                    log.warning("Daily quota exhausted for %s — trying next model", model)
+                    break  # skip retries, try next model
+                delay = _parse_retry_delay(e)
+                if delay > 0 and delay <= _MAX_RETRY_DELAY and attempt < _MAX_RETRIES:
+                    log.warning("Gemini 429 on %s (attempt %d/%d), waiting %.0fs...", model, attempt, _MAX_RETRIES, delay)
+                    time.sleep(delay + 2.0)
+                    continue
+                raise
     raise last_err
 
 
