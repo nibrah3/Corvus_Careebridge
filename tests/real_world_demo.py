@@ -53,8 +53,8 @@ ANNOTATION_TASKS = [
 ]
 
 VIDEO_TASK = {
-    "name": "Animation (video extraction)",
-    "url": "https://en.wikipedia.org/wiki/Animation",
+    "name": "Wikimedia Commons — video file page",
+    "url": "https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_4_seconds_bird_clip.ogv",
 }
 
 _BAR = "=" * 64
@@ -84,7 +84,7 @@ def extract_main_image(cdp) -> str:
                 .filter(function(i) {
                     return i.naturalWidth  > 150
                         && i.naturalHeight > 150
-                        && !/logo|icon|avatar|badge|thumb\.php/i.test(i.src);
+                        && !/logo|icon|avatar|badge|thumb\\.php/i.test(i.src);
                 })
                 .sort(function(a, b) {
                     return (b.naturalWidth * b.naturalHeight)
