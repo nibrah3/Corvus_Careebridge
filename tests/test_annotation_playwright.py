@@ -11,7 +11,7 @@ Strategy:
 
 This tests the full annotation pipeline logic end-to-end in a real browser.
 
-Run: C:\\Python314\\python.exe -m pytest E:\\Corvus_Careebridge\\tests\\test_annotation_playwright.py -v -s
+Run: C:/Python314/python.exe -m pytest E:/Corvus_Careebridge/tests/test_annotation_playwright.py -v -s
 """
 from __future__ import annotations
 
@@ -195,7 +195,17 @@ def test_annotation_pipeline_cdp(http_server):
         stderr=subprocess.DEVNULL,
     )
     try:
-        time.sleep(2.5)  # wait for browser to start
+        # Poll until the CDP port accepts connections (up to 20s)
+        import socket as _socket
+        deadline = time.time() + 20.0
+        while time.time() < deadline:
+            try:
+                with _socket.create_connection(("127.0.0.1", 9223), timeout=0.5):
+                    break
+            except OSError:
+                time.sleep(0.3)
+        else:
+            pytest.fail("Chromium CDP port 9223 never became available (20s timeout)")
 
         cdp = CDPExecutor()
         cdp.connect(port=9223)
