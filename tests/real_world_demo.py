@@ -186,8 +186,11 @@ def run_annotation_loop(page, mouse, cdp) -> dict:
             print(f"    IMAGE : (none found — Wikipedia may have changed layout)")
         results["images"].append(image_url)
 
-        # Gemini vision classification
+        # Gemini vision classification (free tier: 10 RPM — wait 6s between calls)
         if image_url:
+            if i > 1:
+                print(f"  [Gemini ] Waiting 6s (free-tier rate limit)...")
+                time.sleep(6)
             print(f"  [Gemini ] Classifying image...")
             answer = annotate_image(image_url, task["question"], task["options"])
             print(f"    ANSWER: {answer!r}  (expected: {task['expected']!r})")
