@@ -2,7 +2,7 @@
 Unit tests for careerbridge/gemini_vision.py
 
 Tests Gemini API key loading, option matching, and live annotate_image call.
-Run: C:\Python314\python.exe -m pytest E:\Corvus_Careebridge\tests\test_gemini_vision.py -v
+Run: C:\\Python314\\python.exe -m pytest E:\\Corvus_Careebridge\\tests\\test_gemini_vision.py -v
 """
 from __future__ import annotations
 
@@ -54,8 +54,7 @@ def test_annotate_image_live():
     """Live Gemini API call — requires network and valid GEMINI_API_KEY."""
     from careerbridge.gemini_vision import annotate_image
     image_url = (
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/"
-        "Cat03.jpg/1200px-Cat03.jpg"
+        "https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg"
     )
     options = ["Cat", "Dog", "Bird", "Fish"]
     result = annotate_image(image_url, "What type of animal is in this image?", options)
