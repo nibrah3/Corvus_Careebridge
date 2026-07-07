@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Mock Annotation Task</title></head>
+<body>
+  <h2 class="task-question">What type of animal is shown in this image?</h2>
+  <div class="subject">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"
+         alt="animal" width="400" height="300">
+  </div>
+  <div id="choices">
+    <button id="opt-cat"  role="radio" class="answer">Cat</button>
+    <button id="opt-dog"  role="radio" class="answer">Dog</button>
+    <button id="opt-bird" role="radio" class="answer">Bird</button>
+    <button id="opt-fish" role="radio" class="answer">Fish</button>
+  </div>
+  <br>
+  <button id="btn-done">Done</button>
+  <p id="result-display" style="font-weight:bold;color:green;"></p>
+  <script>
+    var selected = null;
+    document.querySelectorAll('[role=radio]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('[role=radio]').forEach(function(b) {
+          b.style.background = '';
+        });
+        btn.style.background = '#90ee90';
+        selected = btn.textContent.trim();
+        document.getElementById('result-display').textContent = 'Selected: ' + selected;
+      });
+    });
+    document.getElementById('btn-done').addEventListener('click', function() {
+      if (selected) {
+        document.getElementById('result-display').textContent = 'DONE: ' + selected;
+      }
+    });
+  </script>
+</body>
+</html>
