@@ -101,7 +101,7 @@ def annotate_video(
     Primary: Gemini Files API (GEMINI_API_KEY) — full video understanding.
     Fallback: 3 keyframes via cv2 → annotate_image_b64.
     """
-    if _GEMINI_API_KEY:
+    if _load_gemini_key():
         try:
             return _video_files_api(video_url, question, options, context)
         except Exception as e:
@@ -114,7 +114,7 @@ def annotate_video(
 
 def _gemini_client():
     from google import genai
-    return genai.Client(api_key=_GEMINI_API_KEY)
+    return genai.Client(api_key=_load_gemini_key())
 
 
 def _image_direct_url(
