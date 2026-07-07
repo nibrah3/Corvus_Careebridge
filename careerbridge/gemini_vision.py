@@ -74,6 +74,9 @@ def annotate_image(
         try:
             return _image_direct_url(image_url, question, options, context)
         except Exception as e:
+            if _is_daily_quota(e):
+                log.error("Gemini daily quota exhausted — skipping OpenRouter fallback: %s", e)
+                return None
             log.warning("Direct Gemini URL image failed (%s) — trying OpenRouter", e)
 
     return _image_openrouter_url(image_url, question, options, context)
@@ -153,13 +156,28 @@ def _image_direct_b64(
     client    = _gemini_client()
     img_bytes = base64.b64decode(image_b64)
     prompt    = _build_prompt(question, options, context)
-    resp      = client.models.generate_content(
-        model=_DIRECT_MODEL,
-        contents=[types.Part.from_bytes(data=img_bytes, mime_type=mime_type), prompt],
-    )
-    raw = (resp.text or "").strip()
-    log.debug("Direct Gemini b64 image raw: %r", raw)
-    return _match_option(raw, options)
+    last_err: Exception = RuntimeError("no attempt made")
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            resp = client.models.generate_content(
+                model=_DIRECT_MODEL,
+                contents=[types.Part.from_bytes(data=img_bytes, mime_type=mime_type), prompt],
+            )
+            raw = (resp.text or "").strip()
+            log.debug("Direct Gemini b64 image raw: %r", raw)
+            return _match_option(raw, options)
+        except Exception as e:
+            last_err = e
+            delay = _parse_retry_delay(e)
+            if _is_daily_quota(e):
+                log.error("Gemini daily quota exhausted — cannot retry: %s", e)
+                raise
+            if delay > 0 and delay <= _MAX_RETRY_DELAY and attempt < _MAX_RETRIES:
+                log.warning("Gemini 429 (attempt %d/%d), waiting %.0fs: %s", attempt, _MAX_RETRIES, delay, e)
+                time.sleep(delay + 1.0)
+                continue
+            raise
+    raise last_err
 
 
 def _video_files_api(
