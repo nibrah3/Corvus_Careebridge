@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import sys
-import math
 import threading
 import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -161,7 +160,7 @@ def main():
         target_y = int(wy + ch + rect["cy"])
 
         # Move mouse & click the answer button
-        print(f"\n[5/6] Moving mouse → {answer!r} button at ({target_x}, {target_y})…")
+        print(f"\n[5/6] Moving mouse -> {answer!r} button at ({target_x}, {target_y})…")
         cx, cy = mouse.position
         smooth_move(mouse, cx, cy, target_x, target_y)
         time.sleep(0.25)
@@ -178,7 +177,7 @@ def main():
         done_x = int(wx + done_rect["cx"])
         done_y = int(wy + ch + done_rect["cy"])
 
-        print(f"\n[6/6] Moving mouse → Done button at ({done_x}, {done_y})…")
+        print(f"\n[6/6] Moving mouse -> Done button at ({done_x}, {done_y})…")
         cx, cy = mouse.position
         smooth_move(mouse, cx, cy, done_x, done_y)
         time.sleep(0.25)
