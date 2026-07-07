@@ -123,43 +123,57 @@ def test_gemini_annotation_on_page(browser_page: Page):
     assert answer == "Cat",    f"Expected 'Cat', Gemini said {answer!r}"
 
 
-def test_full_click_flow(browser_page: Page):
+def test_cdp_extracts_text_images_options(browser_page: Page):
     """
-    Full annotation flow: extract task → Gemini → click matching button → Done.
-    Verifies the result-display shows the correct selection.
-    """
-    from careerbridge.gemini_vision import annotate_image, _match_option
+    Verify CDPExecutor (our system) correctly extracts all three element types
+    from a live page: question text, image URL, and labelled option list with IDs.
 
-    image_url = browser_page.evaluate("document.querySelector('.subject img').src")
-    question  = browser_page.evaluate(
-        "document.querySelector('h2.task-question').innerText.trim()"
+    Playwright is used only to ensure the browser is open and navigated —
+    the extraction itself is done by CDPExecutor, which is what production uses.
+    """
+    from careerbridge.cdp_executor import CDPExecutor
+
+    cdp = CDPExecutor()
+    cdp.connect(port=DEBUG_PORT)
+
+    # --- TEXT extraction ---
+    question = cdp.eval_js(
+        "(function(){"
+        "  var el = document.querySelector('h2.task-question');"
+        "  return el ? el.innerText.trim() : '';"
+        "})()"
     )
-    options   = browser_page.evaluate(
+    assert question and "animal" in question.lower(), f"Text extraction failed: {question!r}"
+
+    # --- IMAGE extraction ---
+    image_url = cdp.eval_js(
+        "(function(){"
+        "  var img = document.querySelector('.subject img');"
+        "  return img ? img.src : '';"
+        "})()"
+    )
+    assert image_url and image_url.startswith("http"), f"Image URL extraction failed: {image_url!r}"
+    assert "Cat03" in image_url, f"Wrong image URL: {image_url!r}"
+
+    # --- OPTIONS extraction (text + clickable IDs) ---
+    raw = cdp.eval_js(
         "Array.from(document.querySelectorAll('[role=\"radio\"]'))"
-        ".map(b => b.textContent.trim())"
-    )
+        ".map(function(b){ return {text: b.textContent.trim(), id: b.id}; })"
+    ) or []
+    options = [o for o in raw if isinstance(o, dict) and o.get("text")]
+    labels  = [o["text"] for o in options]
+    ids     = [o["id"]   for o in options]
 
-    answer = annotate_image(image_url, question, options)
-    assert answer, "No answer from Gemini"
+    assert len(options) == 4,            f"Expected 4 options, got {len(options)}: {options}"
+    assert "Cat"  in labels,             f"'Cat' not in extracted options: {labels}"
+    assert "Dog"  in labels,             f"'Dog' not in extracted options: {labels}"
+    assert all(i.startswith("opt-") for i in ids), f"Unexpected button IDs: {ids}"
 
-    # Click the answer button using Playwright
-    browser_page.click(f'[role="radio"]:text-is("{answer}")')
-    time.sleep(0.3)
+    print(f"\n  [TEXT   ] {question!r}")
+    print(f"  [IMAGE  ] {image_url[:72]}...")
+    print(f"  [OPTIONS] {options}")
 
-    # Verify selection was registered
-    result_text = browser_page.inner_text("#result-display")
-    assert answer in result_text, (
-        f"Expected result to contain {answer!r}, got {result_text!r}"
-    )
-
-    # Click Done
-    browser_page.click("#btn-done")
-    time.sleep(0.3)
-
-    final_text = browser_page.inner_text("#result-display")
-    assert "DONE" in final_text, f"Done was not registered: {final_text!r}"
-    assert answer in final_text, f"Expected {answer!r} in final text: {final_text!r}"
-    print(f"\n  Final state: {final_text}")
+    cdp.disconnect()
 
 
 def test_annotation_pipeline_cdp(http_server):
