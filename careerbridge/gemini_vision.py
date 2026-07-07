@@ -12,8 +12,8 @@ Routing priority (both image and video):
 All calls happen entirely in the Python process. The browser tab only sees
 idle time followed by a single click — no tab blur, no clipboard, no JS fetch.
 
-Direct model:    GEMINI_DIRECT_MODEL  env var (default: gemini-2.0-flash)
-OpenRouter img:  GEMINI_IMAGE_MODEL   env var (default: google/gemini-3.5-flash)
+Direct model:    GEMINI_DIRECT_MODEL  env var (default: gemini-2.5-flash)
+OpenRouter img:  GEMINI_IMAGE_MODEL   env var (default: google/gemini-2.5-flash)
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 
 _OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
 _GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
-_DIRECT_MODEL    = os.environ.get("GEMINI_DIRECT_MODEL", "gemini-2.0-flash")
-_IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-3.5-flash")
+_DIRECT_MODEL    = os.environ.get("GEMINI_DIRECT_MODEL", "gemini-2.5-flash")
+_IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-2.5-flash")
 
 
 # ── Image annotation ──────────────────────────────────────────────────────────
