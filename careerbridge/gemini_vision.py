@@ -31,8 +31,9 @@ _IMAGE_MODEL     = os.environ.get("GEMINI_IMAGE_MODEL", "google/gemini-2.5-flash
 
 _MAX_RETRIES      = 2
 _MAX_RETRY_DELAY  = 120.0  # seconds — above this give up retrying
-# When primary model hits daily quota, try these in order
-_FALLBACK_MODELS  = ["gemini-2.0-flash", "gemini-1.5-flash"]
+# When primary model hits daily quota, try these in order.
+# Lite models have ~200 RPD free quota vs 20 RPD for standard models.
+_FALLBACK_MODELS  = ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-001"]
 
 
 def _parse_retry_delay(err: Exception) -> float:
