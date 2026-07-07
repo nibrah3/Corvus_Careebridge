@@ -11,7 +11,7 @@ Strategy:
 
 This tests the full annotation pipeline logic end-to-end in a real browser.
 
-Run: C:\Python314\python.exe -m pytest E:\Corvus_Careebridge\tests\test_annotation_playwright.py -v -s
+Run: C:\\Python314\\python.exe -m pytest E:\\Corvus_Careebridge\\tests\\test_annotation_playwright.py -v -s
 """
 from __future__ import annotations
 
