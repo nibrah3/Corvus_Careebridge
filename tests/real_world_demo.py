@@ -53,8 +53,8 @@ ANNOTATION_TASKS = [
 ]
 
 VIDEO_TASK = {
-    "name": "Wikimedia Commons — video file page",
-    "url": "https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_4_seconds_bird_clip.ogv",
+    "name": "W3Schools HTML5 Video tutorial",
+    "url": "https://www.w3schools.com/html/html5_video.asp",
 }
 
 _BAR = "=" * 64
@@ -109,24 +109,22 @@ def extract_page_text(cdp) -> str:
 
 
 def extract_video_urls(cdp) -> list:
-    """Extract all <video> source URLs from the page."""
+    """Extract all video source URLs from the page."""
     return cdp.eval_js("""
         (function() {
             var urls = [];
-            // Direct <video src="...">
-            document.querySelectorAll('video[src]').forEach(function(v) {
-                if (v.src) urls.push(v.src);
+            document.querySelectorAll('video').forEach(function(v) {
+                if (v.src)         urls.push(v.src);
+                if (v.currentSrc)  urls.push(v.currentSrc);
             });
-            // <video><source src="...">
             document.querySelectorAll('video source[src]').forEach(function(s) {
                 if (s.src) urls.push(s.src);
             });
-            // data-src on video/source elements (lazy-loaded)
             document.querySelectorAll('video[data-src], source[data-src]').forEach(function(el) {
                 var u = el.getAttribute('data-src');
                 if (u) urls.push(u.startsWith('http') ? u : location.origin + u);
             });
-            return urls.filter(function(u, i, a) { return a.indexOf(u) === i; });
+            return urls.filter(function(u, i, a) { return u && a.indexOf(u) === i; });
         })()
     """) or []
 
