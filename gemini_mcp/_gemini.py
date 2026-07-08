@@ -116,6 +116,88 @@ def analyse_image(image_path: str, prompt: str, model: str = "gemini-2.5-flash")
         return {"error": str(exc)}
 
 
+def upload_file(file_path: str, mime_type: str | None = None) -> dict:
+    """
+    Upload any file (audio/video/image) to Gemini File API. Polls until ACTIVE.
+
+    Returns {uri, name, size_mb, state, upload_ms, mime_type} or {error: str}.
+    """
+    try:
+        import mimetypes
+        client = _client()
+        path = Path(file_path)
+        if not path.exists():
+            return {"error": f"File not found: {file_path}"}
+
+        mime = mime_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        t0 = time.monotonic()
+        uploaded = client.files.upload(file=str(path), config={"mime_type": mime})
+
+        deadline = time.monotonic() + 120
+        while uploaded.state.name != "ACTIVE":
+            if time.monotonic() > deadline:
+                return {"error": "Gemini file processing timed out after 120s"}
+            time.sleep(3)
+            uploaded = client.files.get(name=uploaded.name)
+
+        upload_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "uri":       uploaded.uri,
+            "name":      uploaded.name,
+            "size_mb":   round(path.stat().st_size / (1024 * 1024), 4),
+            "state":     uploaded.state.name,
+            "upload_ms": upload_ms,
+            "mime_type": mime,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def analyse_files(
+    files: list[dict],  # [{uri, mime_type}, ...]
+    prompt: str,
+    model: str = "gemini-2.5-flash",
+) -> dict:
+    """
+    Send one or more uploaded files + a text prompt to Gemini in a single call.
+
+    files: list of dicts with keys 'uri' and 'mime_type'.
+    Returns {text, model, elapsed_ms} or {error: str}.
+    """
+    try:
+        from google.genai import types
+        client = _client()
+        t0 = time.monotonic()
+        parts = [types.Part.from_uri(file_uri=f["uri"], mime_type=f["mime_type"]) for f in files]
+        parts.append(prompt)
+        resp = client.models.generate_content(model=model, contents=parts)
+        return {
+            "text":       resp.text,
+            "model":      model,
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def analyse_text(context: str, prompt: str, model: str = "gemini-2.5-flash") -> dict:
+    """Send a text context + question prompt to Gemini. Returns {text, model, elapsed_ms}."""
+    try:
+        client = _client()
+        t0 = time.monotonic()
+        resp = client.models.generate_content(
+            model=model,
+            contents=f"{context}\n\n---\n\n{prompt}",
+        )
+        return {
+            "text":       resp.text,
+            "model":      model,
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 def delete_file(file_name: str) -> dict:
     """Delete an uploaded file from Gemini File API to free quota."""
     try:
