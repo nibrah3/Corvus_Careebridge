@@ -478,4 +478,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Direct mode: python aether_capture.py watch [LABEL]
+    # e.g.  python aether_capture.py watch A
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "watch":
+        import tutor_mcp._audio as _audio
+        label = sys.argv[2].upper() if len(sys.argv) > 2 else "A"
+        print(f"\n  Starting WASAPI ...", end=" ", flush=True)
+        _audio.start()
+        print("ready.")
+        cmd_watch(label, _audio)
+        analysis = cmd_analyse(label)
+        _audio.stop()
+        sys.exit(0)
     main()
