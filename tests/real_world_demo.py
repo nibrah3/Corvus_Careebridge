@@ -35,6 +35,8 @@ import sys
 import time
 from typing import Optional
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, r"E:\Corvus_Careebridge")
 
 
