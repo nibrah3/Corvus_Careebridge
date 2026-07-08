@@ -1,0 +1,1 @@
+/usr/bin/bash: line 2: C:Python314python.exe: command not found
