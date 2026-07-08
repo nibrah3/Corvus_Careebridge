@@ -312,34 +312,55 @@ def phase2_audio_capture(page, audio_mod) -> dict:
 
     print(f"\n[{_ts()}] PHASE 2: Audio capture + transcription (Web Audio API tone)")
 
-    # Blank page so there are no competing sounds or elements to locate
-    page.goto("about:blank")
-    time.sleep(0.5)
+    # Use a real HTML page — about:blank leaves the Windows audio engine idle,
+    # causing WASAPI loopback stream.read() to block and yield 0 chunks.
+    page.goto("data:text/html,<html><body><h1>Audio Test</h1></body></html>")
+    time.sleep(0.3)
+    page.mouse.click(400, 300)  # user gesture — needed for AudioContext.resume()
+    time.sleep(0.1)
+
+    # Wake the audio engine: play a very short silent buffer so WASAPI loopback
+    # stops blocking in stream.read() before we open the measurement window.
+    WAKE_JS = """(async function() {
+        var ctx = new AudioContext();
+        await ctx.resume();
+        var buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.15), ctx.sampleRate);
+        var src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start();
+        return ctx.state;
+    })()"""
+    try:
+        wake_state = page.evaluate(WAKE_JS)
+        print(f"  [WebAudio] Warmup AudioContext state: {wake_state}")
+    except Exception as e:
+        print(f"  [WebAudio] Warmup warning: {e}")
+    time.sleep(1.5)  # let WASAPI thread unblock and fill rolling buffer
 
     audio_start_t = time.time()
 
-    # 440 Hz sine tone for 8 seconds via Web Audio API.
-    # Renders through the OS audio stack — WASAPI loopback will capture it.
-    JS_TONE = """
-        (function() {
-            var ctx = new AudioContext();
-            var osc = ctx.createOscillator();
-            var gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(440, ctx.currentTime);
-            gain.gain.setValueAtTime(0.4, ctx.currentTime);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            osc.stop(ctx.currentTime + 8);
-        })();
-    """
+    # 440 Hz sine tone for 8 seconds. async+resume() guarantees ctx is running.
+    JS_TONE = """(async function() {
+        var ctx = new AudioContext();
+        await ctx.resume();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gain.gain.setValueAtTime(0.4, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 8);
+        return ctx.state;
+    })()"""
     print("  [WebAudio] Playing 440 Hz sine tone for 8s via Web Audio API...")
     played = False
     try:
-        page.evaluate(JS_TONE)
+        tone_state = page.evaluate(JS_TONE)
         played = True
-        print("  [WebAudio] Tone started")
+        print(f"  [WebAudio] Tone started (ctx state: {tone_state})")
     except Exception as e:
         print(f"  [WebAudio] Failed to inject tone: {e}")
 
