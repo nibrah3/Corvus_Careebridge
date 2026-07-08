@@ -33,9 +33,9 @@ _OUT_DIR = "C:/tmp"
 os.makedirs(_OUT_DIR, exist_ok=True)
 
 # ── Target page ───────────────────────────────────────────────────────────────
-# BBC Bitesize: science article with text, images, embedded video, and quiz.
-# Change this to any page that has the same elements.
-TARGET_URL = "https://www.bbc.co.uk/bitesize/articles/z8bnh39"
+# YouTube educational video: "What is DNA?" by Khan Academy (3 min, animated, audio)
+# Change this to any YouTube video URL for manual-navigation testing.
+TARGET_URL = "https://www.youtube.com/watch?v=EIMaRpntomk"
 
 MODELS = [
     "gemini-2.5-flash",
@@ -186,7 +186,8 @@ def _encode_muxed_mp4(
     a.layout = "stereo" if n_ch >= 2 else "mono"
 
     for idx, (_, bgr) in enumerate(frames_ts):
-        vf = av.VideoFrame.from_ndarray(bgr[:, :, ::-1].copy(), format="rgb24")
+        rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+        vf = av.VideoFrame.from_ndarray(rgb, format="rgb24")
         vf.pts = idx
         for pkt in v.encode(vf):
             out.mux(pkt)
