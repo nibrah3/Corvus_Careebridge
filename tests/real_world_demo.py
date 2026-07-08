@@ -286,7 +286,7 @@ def run_video_capture(page, mouse) -> dict:
         return {"mode": "mss_capture_failed", "error": "no frames", "clip_path": None}
 
     # 3. Encode frames → MP4
-    print(f"  [OpenCV] Encoding {len(frames)} frames → {clip_path}")
+    print(f"  [OpenCV] Encoding {len(frames)} frames -> {clip_path}")
     _frames_to_mp4(frames, clip_path, fps=RECORD_FPS)
     file_size = os.path.getsize(clip_path)
     print(f"  [OpenCV] MP4 saved: {clip_path} ({file_size // 1024} KB)")
