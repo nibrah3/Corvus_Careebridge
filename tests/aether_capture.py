@@ -166,7 +166,7 @@ def _encode_muxed_mp4(frames_ts: list, audio_chunks: list, output_path: str) -> 
             samp = pcm_f[i: i + CHUNK]
             if len(samp) < CHUNK:
                 samp = np.pad(samp, ((0, CHUNK - len(samp)), (0, 0)))
-            af = av.AudioFrame.from_ndarray(samp.T, format="fltp", layout=layout)
+            af = av.AudioFrame.from_ndarray(np.ascontiguousarray(samp.T), format="fltp", layout=layout)
             af.sample_rate = sample_rate
             af.pts = pts
             pts += CHUNK
