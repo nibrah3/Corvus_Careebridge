@@ -14,9 +14,37 @@ import os
 import time
 from pathlib import Path
 
+_KEY_OVERRIDE: str | None = None
+
+
+def set_key_override(key: str | None) -> None:
+    """Set a temporary API key override for the next _client() call."""
+    global _KEY_OVERRIDE
+    _KEY_OVERRIDE = key
+
+
+def get_all_keys() -> list[str]:
+    """Read GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3 from .env."""
+    env_file = Path(__file__).parent.parent / ".env"
+    if not env_file.exists():
+        return [k for k in [os.environ.get("GEMINI_API_KEY", "")] if k]
+    text = env_file.read_text(encoding="utf-8")
+    keys = []
+    for suffix in ("", "_2", "_3"):
+        name = f"GEMINI_API_KEY{suffix}"
+        for line in text.splitlines():
+            if line.startswith(f"{name}="):
+                v = line.split("=", 1)[1].strip()
+                if v:
+                    keys.append(v)
+                break
+    return keys
+
 
 def _client():
     from google import genai
+    if _KEY_OVERRIDE:
+        return genai.Client(api_key=_KEY_OVERRIDE)
     # Always read from .env so key rotations take effect without restarting the server.
     api_key = ""
     env_file = Path(__file__).parent.parent / ".env"

@@ -55,27 +55,36 @@ def _ts() -> str:
 
 
 def _gemini_with_fallback(fn, label: str) -> tuple[str, str]:
-    for model in MODELS:
-        try:
-            result = fn(model)
-        except Exception as e:
-            err = str(e)
-            if any(k in err for k in RETRY_MARKERS):
-                print(f"  [{label}] {model}: retriable — trying next")
-                continue
-            print(f"  [{label}] {model}: exception — {e}")
-            break
-        if isinstance(result, dict) and "error" in result:
-            err = str(result["error"])
-            if any(k in err for k in RETRY_MARKERS):
-                print(f"  [{label}] {model}: retriable — trying next")
-                continue
-            print(f"  [{label}] {model}: error — {err}")
-            break
-        text = result.get("text", "") if isinstance(result, dict) else str(result or "")
-        if text:
-            return text, model
-        print(f"  [{label}] {model}: empty — trying next")
+    from gemini_mcp._gemini import set_key_override, get_all_keys
+    keys = get_all_keys()
+    if not keys:
+        keys = [None]
+    try:
+        for ki, key in enumerate(keys, 1):
+            set_key_override(key)
+            for model in MODELS:
+                try:
+                    result = fn(model)
+                except Exception as e:
+                    err = str(e)
+                    if any(k in err for k in RETRY_MARKERS):
+                        print(f"  [{label}] {model} (k{ki}): quota — next")
+                        continue
+                    print(f"  [{label}] {model}: exception — {e}")
+                    break
+                if isinstance(result, dict) and "error" in result:
+                    err = str(result["error"])
+                    if any(k in err for k in RETRY_MARKERS):
+                        print(f"  [{label}] {model} (k{ki}): quota — next")
+                        continue
+                    print(f"  [{label}] {model}: error — {err}")
+                    break
+                text = result.get("text", "") if isinstance(result, dict) else str(result or "")
+                if text:
+                    return text, model
+                print(f"  [{label}] {model}: empty — trying next")
+    finally:
+        set_key_override(None)
     return "", "none"
 
 
