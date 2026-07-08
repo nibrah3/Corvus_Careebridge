@@ -164,7 +164,7 @@ def _encode_muxed_mp4(
     v.options = {"preset": "ultrafast", "crf": "23"}
 
     a = out.add_stream("aac", rate=sample_rate)
-    a.channels = n_ch
+    a.layout = "stereo" if n_ch >= 2 else "mono"
 
     for idx, (_, bgr) in enumerate(frames_ts):
         vf = av.VideoFrame.from_ndarray(bgr[:, :, ::-1].copy(), format="rgb24")
