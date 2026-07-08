@@ -302,26 +302,37 @@ def run_video_capture(page, mouse) -> dict:
 
     print(f"  [Gemini] Upload complete: {upload_info.get('uri')} ({upload_info.get('upload_ms')}ms)")
 
-    # 5. Gemini analyses the recorded video
-    print(f"  [Gemini] Analysing screen recording...")
-    analysis = analyse_video(
-        upload_info["uri"],
-        (
-            "This is a screen recording of a web browser showing an HTML5 video tutorial page. "
-            "Describe: (1) what web page is shown, (2) what video content is visible or playing, "
-            "(3) what text or UI elements you can see. Be specific."
-        ),
+    # 5. Gemini analyses the recorded video — try fallback models on quota exhaustion
+    ANALYSIS_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash-001"]
+    VIDEO_PROMPT = (
+        "This is a screen recording of a web browser showing an HTML5 video tutorial page. "
+        "Describe: (1) what web page is shown, (2) what video content is visible or playing, "
+        "(3) what text or UI elements you can see. Be specific."
     )
-
-    gemini_text = analysis.get("text", "") if isinstance(analysis, dict) else str(analysis)
-    print(f"  [Gemini] Analysis: {gemini_text[:300]}{'...' if len(gemini_text) > 300 else ''}")
+    gemini_text = ""
+    for model in ANALYSIS_MODELS:
+        print(f"  [Gemini] Analysing screen recording with {model}...")
+        analysis = analyse_video(upload_info["uri"], VIDEO_PROMPT, model=model)
+        if isinstance(analysis, dict) and "error" in analysis:
+            err = analysis["error"]
+            if any(k in err for k in ("quota", "Quota", "RESOURCE_EXHAUSTED", "429")):
+                print(f"  [Gemini] {model} quota exhausted — trying next model")
+                continue
+            print(f"  [Gemini] {model} error: {err}")
+            break
+        gemini_text = analysis.get("text", "") if isinstance(analysis, dict) else str(analysis)
+        if gemini_text:
+            print(f"  [Gemini] [{model}] Analysis: {gemini_text[:300]}{'...' if len(gemini_text) > 300 else ''}")
+            break
+    if not gemini_text:
+        print("  [Gemini] All models quota-exhausted for video analysis — upload succeeded, analysis deferred")
 
     return {
         "mode": "mss_video_capture",
         "clip_path": clip_path,
         "frame_count": len(frames),
         "gemini_uri": upload_info.get("uri"),
-        "gemini_analysis": gemini_text,
+        "gemini_analysis": gemini_text or None,
     }
 
 
