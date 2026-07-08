@@ -188,13 +188,13 @@ def _capture_loop():
     use_dxgi = False
     try:
         import dxcam
-        _probe_cam = dxcam.create(output_color="BGR")
-        probe = _probe_cam.grab()  # returns None quickly if DX surface unavailable
+        cam = dxcam.create(output_color="BGR")
+        probe = cam.grab()  # returns None if DX surface unavailable
         if probe is not None:
             use_dxgi = True
-            cam = dxcam.create(output_color="BGR")
             cam.start(target_fps=_CAPTURE_FPS)
-        # _probe_cam is garbage-collected
+        else:
+            cam = None
     except Exception:
         cam = None
 
