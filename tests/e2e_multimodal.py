@@ -421,12 +421,13 @@ def phase2_audio_capture(page, audio_mod) -> dict:
 def phase3_video_audio(page, mouse, audio_mod) -> dict:
     """
     W3Schools video page. Playwright clicks Play.
-    MSS records screen frames. WASAPI already captures audio (rolling buffer).
-    Video frames -> MP4. Audio window -> WAV.
-    Both uploaded separately to Gemini Files API.
-    Gemini analyses visual content AND audio in ONE call.
+    dxcam (DXGI) records screen frames with wall-clock timestamps.
+    WASAPI rolling buffer provides audio for the same window.
+    PyAV muxes both into a single MP4 with PTS-accurate A/V sync.
+    One file uploaded to Gemini — no duration mismatch.
     """
     from gemini_mcp._gemini import upload_file, analyse_files
+    import numpy as np
 
     print(f"\n[{_ts()}] PHASE 3: Simultaneous video + audio (W3Schools video)")
 
@@ -434,7 +435,6 @@ def phase3_video_audio(page, mouse, audio_mod) -> dict:
     page.goto("https://www.w3schools.com/html/html5_video.asp", wait_until="domcontentloaded")
     time.sleep(2.5)
 
-    # Human-like mouse movement to page centre
     wx = page.evaluate("window.screenX")
     wy = page.evaluate("window.screenY")
     ch_off = page.evaluate("window.outerHeight - window.innerHeight")
@@ -447,10 +447,8 @@ def phase3_video_audio(page, mouse, audio_mod) -> dict:
     page.evaluate("window.scrollBy(0, 600)")
     time.sleep(1.0)
 
-    # Mark audio start time before clicking play
     audio_start_t = time.time()
 
-    # Click play
     print("  [Playwright] Clicking play on video element...")
     try:
         vh = page.locator("video").first
@@ -467,77 +465,55 @@ def phase3_video_audio(page, mouse, audio_mod) -> dict:
 
     time.sleep(0.5)
 
-    # Record 10s of MSS frames while video plays
     RECORD_S = 10
     FPS = 10
-    print(f"  [MSS] Recording {RECORD_S}s at {FPS}fps (OS framebuffer)...")
-    frames = _mss_record_frames(RECORD_S, fps=FPS)
+    print(f"  [dxcam] Recording {RECORD_S}s at {FPS}fps (DXGI framebuffer)...")
+    frames_ts = _dxcam_record_frames(RECORD_S, fps=FPS)
     audio_end_t = time.time()
-    print(f"  [MSS] Captured {len(frames)} frames")
+    print(f"  [dxcam] Captured {len(frames_ts)} frames")
 
-    if not frames:
-        return {"pass": False, "error": "no MSS frames captured", "video_analysis": ""}
+    if not frames_ts:
+        return {"pass": False, "error": "no dxcam frames captured", "video_analysis": ""}
 
-    # Encode video-only MP4
-    video_path = f"{_OUT_DIR}/mm_video.mp4"
-    print(f"  [OpenCV] Encoding {len(frames)} frames -> {video_path}...")
-    _frames_to_mp4(frames, video_path, fps=FPS)
-    video_kb = os.path.getsize(video_path) // 1024
-    print(f"  [OpenCV] MP4 saved ({video_kb}KB)")
-
-    # Extract matching audio window from rolling buffer
     chunks = audio_mod.get_window(audio_start_t, audio_end_t)
     print(f"  [WASAPI] Extracted {len(chunks)} audio chunks for this window")
 
-    wav_path = f"{_OUT_DIR}/mm_video_audio.wav"
-    if chunks:
-        audio_mod.save_wav(chunks, wav_path)
-        wav_kb = os.path.getsize(wav_path) // 1024
-        print(f"  [WAV] Audio saved ({wav_kb}KB)")
-    else:
-        wav_path = None
-        wav_kb = 0
-        print("  [WAV] No audio chunks in window")
+    # Single muxed MP4: video at actual-capture fps + audio embedded → no sync drift
+    muxed_path = f"{_OUT_DIR}/mm_video_muxed.mp4"
+    print(f"  [PyAV] Muxing {len(frames_ts)} frames + {len(chunks)} audio chunks -> {muxed_path}...")
+    try:
+        _encode_muxed_mp4(frames_ts, chunks, muxed_path)
+        muxed_kb = os.path.getsize(muxed_path) // 1024
+        print(f"  [PyAV] Muxed MP4 saved ({muxed_kb}KB)")
+    except Exception as e:
+        return {"pass": False, "error": f"PyAV mux failed: {e}", "video_analysis": ""}
 
-    # Upload video to Gemini Files API
-    print("  [Gemini] Uploading video to Files API...")
-    video_upload = upload_file(video_path, mime_type="video/mp4")
-    if "error" in video_upload:
-        print(f"  [Gemini] Video upload failed: {video_upload['error']}")
-        return {"pass": False, "error": video_upload["error"], "video_analysis": ""}
+    print("  [Gemini] Uploading muxed video+audio MP4 to Files API...")
+    muxed_upload = upload_file(muxed_path, mime_type="video/mp4")
+    if "error" in muxed_upload:
+        print(f"  [Gemini] Upload failed: {muxed_upload['error']}")
+        return {"pass": False, "error": muxed_upload["error"], "video_analysis": ""}
 
-    video_uri = video_upload["uri"]
-    print(f"  [Gemini] Video uploaded: {video_uri} ({video_upload['upload_ms']}ms)")
+    muxed_uri = muxed_upload["uri"]
+    has_audio = bool(chunks)
+    print(f"  [Gemini] Uploaded: {muxed_uri} ({muxed_upload['upload_ms']}ms)")
 
-    # Upload audio WAV if available
-    files_for_gemini = [{"uri": video_uri, "mime_type": "video/mp4"}]
-    audio_uri = None
-    if wav_path and os.path.exists(wav_path):
-        print("  [Gemini] Uploading audio WAV to Files API...")
-        audio_upload = upload_file(wav_path, mime_type="audio/wav")
-        if "error" not in audio_upload:
-            audio_uri = audio_upload["uri"]
-            files_for_gemini.append({"uri": audio_uri, "mime_type": "audio/wav"})
-            print(f"  [Gemini] Audio uploaded: {audio_uri} ({audio_upload['upload_ms']}ms)")
-        else:
-            print(f"  [Gemini] Audio upload failed: {audio_upload['error']}")
+    files_for_gemini = [{"uri": muxed_uri, "mime_type": "video/mp4"}]
 
-    # Gemini analyses BOTH visual and audio in one call
-    has_audio = len(files_for_gemini) > 1
     COMBINED_PROMPT = (
-        "You are receiving a screen recording of a web browser playing an HTML5 video, "
-        + ("plus the simultaneously captured system audio from that session. " if has_audio else "")
+        "You are receiving a screen recording of a web browser playing an HTML5 video"
+        + (", with system audio embedded in the video file. " if has_audio else ". ")
         + "Analyse and describe:\n"
         "(1) What web page or video is shown on screen.\n"
         "(2) What is happening visually — is the video playing, what content is visible.\n"
-        + ("(3) What you hear in the audio — transcribe any speech, describe music or sounds.\n"
+        + ("(3) What you hear in the audio track — transcribe any speech, describe music or sounds.\n"
            "(4) How the audio relates to what is shown on screen.\n" if has_audio else
            "(3) What text or UI elements are visible.\n")
         + "Be specific. This is a passive observation system recording a human browsing the web."
     )
 
-    mode = "video+audio" if has_audio else "video-only"
-    print(f"  [Gemini] Analysing {mode} ({len(files_for_gemini)} file(s))...")
+    mode = "muxed video+audio" if has_audio else "video-only"
+    print(f"  [Gemini] Analysing {mode} (single muxed MP4)...")
     analysis, model_used = _gemini_with_fallback(
         lambda m: analyse_files(files_for_gemini, COMBINED_PROMPT, model=m),
         "Gemini/video-audio",
@@ -550,13 +526,13 @@ def phase3_video_audio(page, mouse, audio_mod) -> dict:
         print("  [Gemini] All models exhausted.")
 
     return {
-        "pass": len(frames) > 0 and bool(video_uri),
-        "video_path": video_path,
-        "video_kb": video_kb,
-        "video_uri": video_uri,
-        "wav_path": wav_path,
-        "audio_uri": audio_uri,
-        "frame_count": len(frames),
+        "pass": len(frames_ts) > 0 and bool(muxed_uri),
+        "video_path": muxed_path,
+        "video_kb": muxed_kb,
+        "video_uri": muxed_uri,
+        "wav_path": muxed_path,   # audio embedded in muxed MP4
+        "audio_uri": muxed_uri,   # same file
+        "frame_count": len(frames_ts),
         "audio_chunks": len(chunks),
         "has_audio": has_audio,
         "video_analysis": analysis,
