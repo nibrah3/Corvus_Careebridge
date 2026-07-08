@@ -1,26 +1,36 @@
 """
-Real-world annotation pipeline demo.
+Real-world annotation pipeline demo — correct framebuffer extraction implementation.
 
-Demonstrates CDPExecutor extraction + Gemini vision on real public websites,
-in a continuous loop — matching the production annotation workflow.
+Architecture (per CLAUDE.md Passive Annotation Tutor Pipeline):
+  Playwright  → browser navigation (simulated human operator)
+  MSS/DXGI    → OS-level framebuffer capture of what is displayed on screen
+  Gemini      → vision analysis of the captured screen frame
+  Text output → system produces answer; never interacts with the page
 
-Architecture:
-  Playwright  -> open browser, navigate to real sites (human simulation layer)
-  CDPExecutor -> extract text, image URLs, video URLs (our system under test)
-  pynput      -> physical OS mouse movement (visible on screen, isTrusted=true)
-  Gemini      -> classify/describe extracted content
+This is the ACTUAL CareerBridge extraction system:
+  NOT CDPExecutor / DOM inspection
+  NOT CDP Page.captureScreenshot
+  YES MSS/DXGI GPU framebuffer capture (DXGI = undetectable by websites)
+  YES Gemini vision analysis of the captured frame
+
+The key insight from CLAUDE.md:
+  "DXGI hooks into the Windows GPU compositor swap chain and is invisible to websites.
+   Sites detect screenshots only via CDP Page.captureScreenshot, --force-renderer-
+   accessibility, or injected browser extensions — none of which this pipeline uses."
 
 Loop:
-  Task 1/3 — Cat     (Wikipedia) : text + image -> Gemini
-  Task 2/3 — Dog     (Wikipedia) : text + image -> Gemini
-  Task 3/3 — Eagle   (Wikipedia) : text + image -> Gemini
-  Video     — Animation (Wikipedia) : video URL extraction
+  Task 1/3 — Cat   (Wikipedia) : navigate → framebuffer capture → Gemini → text answer
+  Task 2/3 — Dog   (Wikipedia) : navigate → framebuffer capture → Gemini → text answer
+  Task 3/3 — Eagle (Wikipedia) : navigate → framebuffer capture → Gemini → text answer
+  Video     — W3Schools HTML5  : navigate → start screen recording → play → stop → Gemini
 
 Run:
     C:\\Python314\\python.exe E:\\Corvus_Careebridge\\tests\\real_world_demo.py
 """
 from __future__ import annotations
 
+import base64
+import os
 import sys
 import time
 from typing import Optional
@@ -32,21 +42,21 @@ ANNOTATION_TASKS = [
     {
         "name": "Cat",
         "url": "https://en.wikipedia.org/wiki/Cat",
-        "question": "What animal is shown in this image?",
+        "question": "What animal is shown prominently on this page?",
         "options": ["Cat", "Dog", "Bird", "Other animal"],
         "expected": "Cat",
     },
     {
         "name": "Dog",
         "url": "https://en.wikipedia.org/wiki/Dog",
-        "question": "What animal is shown in this image?",
+        "question": "What animal is shown prominently on this page?",
         "options": ["Cat", "Dog", "Bird", "Other animal"],
         "expected": "Dog",
     },
     {
         "name": "Bald Eagle",
         "url": "https://en.wikipedia.org/wiki/Bald_eagle",
-        "question": "What animal is shown in this image?",
+        "question": "What animal is shown prominently on this page?",
         "options": ["Cat", "Dog", "Bird", "Other animal"],
         "expected": "Bird",
     },
@@ -68,77 +78,44 @@ def smooth_move(mouse, x1: int, y1: int, x2: int, y2: int, steps: int = 35, dela
         time.sleep(delay)
 
 
-def extract_main_image(cdp) -> str:
-    """Find the largest non-icon, non-logo image on the page."""
-    return cdp.eval_js("""
-        (function() {
-            // Wikipedia infobox image (most reliable for animal articles)
-            var infobox = document.querySelector(
-                '.infobox img, .mw-parser-output .infobox img, ' +
-                'table.infobox img, .biota img'
-            );
-            if (infobox && infobox.naturalWidth > 80) return infobox.src;
-
-            // Fallback: largest image on page (skip tiny icons)
-            var imgs = Array.from(document.querySelectorAll('img'))
-                .filter(function(i) {
-                    return i.naturalWidth  > 150
-                        && i.naturalHeight > 150
-                        && !/logo|icon|avatar|badge|thumb\\.php/i.test(i.src);
-                })
-                .sort(function(a, b) {
-                    return (b.naturalWidth * b.naturalHeight)
-                         - (a.naturalWidth * a.naturalHeight);
-                });
-            return imgs.length ? imgs[0].src : '';
-        })()
-    """) or ""
-
-
-def extract_page_text(cdp) -> str:
-    """Extract the first meaningful paragraph of text."""
-    return cdp.eval_js("""
-        (function() {
-            var title = document.querySelector('h1#firstHeading, h1.firstHeading, h1');
-            var t = title ? title.innerText.trim() : '';
-            var p = document.querySelector('p');
-            var body = p ? p.innerText.trim().slice(0, 200) : '';
-            return t + ' — ' + body;
-        })()
-    """) or ""
-
-
-def extract_video_urls(cdp) -> list:
-    """Extract all video source URLs from the page."""
-    return cdp.eval_js("""
-        (function() {
-            var urls = [];
-            document.querySelectorAll('video').forEach(function(v) {
-                if (v.src)         urls.push(v.src);
-                if (v.currentSrc)  urls.push(v.currentSrc);
-            });
-            document.querySelectorAll('video source[src]').forEach(function(s) {
-                if (s.src) urls.push(s.src);
-            });
-            document.querySelectorAll('video[data-src], source[data-src]').forEach(function(el) {
-                var u = el.getAttribute('data-src');
-                if (u) urls.push(u.startsWith('http') ? u : location.origin + u);
-            });
-            return urls.filter(function(u, i, a) { return u && a.indexOf(u) === i; });
-        })()
-    """) or []
-
-
-def run_annotation_loop(page, mouse, cdp) -> dict:
+def capture_screen_b64() -> tuple[str, str]:
     """
-    Main loop: process each annotation task in sequence.
-    Returns summary dict of what was extracted.
+    Capture the current screen via MSS (or GDI fallback) framebuffer.
+
+    Returns (base64_string, mime_type).
+    This is the non-intrusive extraction layer — OS-level pixel read,
+    no CDP, no JS injection, invisible to the browser/website.
     """
-    from careerbridge.gemini_vision import annotate_image
+    from capture_mcp._backend_mss import capture as mss_capture, available as mss_ok
+    from capture_mcp._backend_gdi import capture as gdi_capture, available as gdi_ok
+    from PIL import Image
+    import io
+
+    if mss_ok():
+        img_bytes = mss_capture()
+    elif gdi_ok():
+        img_bytes = gdi_capture()
+    else:
+        raise RuntimeError("No framebuffer capture backend available (install mss or check GDI)")
+
+    # Convert PNG → JPEG at 80% quality to reduce Gemini payload size
+    pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    buf = io.BytesIO()
+    pil.save(buf, format="JPEG", quality=80, optimize=True)
+    jpeg_bytes = buf.getvalue()
+
+    return base64.standard_b64encode(jpeg_bytes).decode(), "image/jpeg"
+
+
+def run_annotation_loop(page, mouse) -> dict:
+    """
+    Main loop: Playwright navigates, framebuffer captures what's on screen,
+    Gemini analyses what it sees. No DOM inspection. No CDP. No JS eval.
+    """
+    from careerbridge.gemini_vision import annotate_image_b64
 
     results = {
-        "text":    [],
-        "images":  [],
+        "frames":  [],
         "answers": [],
         "correct": 0,
     }
@@ -149,163 +126,224 @@ def run_annotation_loop(page, mouse, cdp) -> dict:
         print(f"[Task {i}/{len(ANNOTATION_TASKS)}] {name}")
         print(f"  URL: {task['url']}")
 
-        # Playwright navigates (human simulation — address bar, loading)
+        # 1. Playwright navigates — this is the simulated human operator
         print(f"  [Playwright] Navigating browser...")
         page.goto(task["url"], wait_until="domcontentloaded")
-        time.sleep(2.5)  # let Wikipedia lazy-load images
+        time.sleep(3.0)  # allow Wikipedia to lazy-load images
 
-        # Physical mouse: simulate reading by scrolling down slightly
-        wx  = page.evaluate("window.screenX")
-        wy  = page.evaluate("window.screenY")
-        ch  = page.evaluate("window.outerHeight - window.innerHeight")
-        cx, cy = mouse.position
+        # 2. Physical mouse — smooth movement to browser centre (human rhythm)
+        wx       = page.evaluate("window.screenX")
+        wy       = page.evaluate("window.screenY")
+        ch       = page.evaluate("window.outerHeight - window.innerHeight")
+        cx, cy   = mouse.position
         center_x = wx + page.evaluate("window.innerWidth") // 2
         center_y = wy + ch + page.evaluate("window.innerHeight") // 2
 
-        print(f"  [pynput ] Moving mouse to page center ({center_x}, {center_y})...")
+        print(f"  [pynput] Moving mouse to page centre ({center_x}, {center_y})...")
         smooth_move(mouse, cx, cy, center_x, center_y)
-        time.sleep(0.3)
+        time.sleep(0.4)
 
-        # Scroll down to trigger lazy image loads
-        page.evaluate("window.scrollBy(0, 300)")
+        # Scroll to reveal infobox (Wikipedia puts the animal photo in top-right infobox)
+        page.keyboard.press("End")   # scroll to bottom to trigger all lazy loads
         time.sleep(0.8)
-        page.evaluate("window.scrollBy(0, -200)")
-        time.sleep(0.5)
+        page.keyboard.press("Home")  # scroll back to top where the infobox is
+        time.sleep(0.8)
 
-        # CDPExecutor extracts text + image (OUR SYSTEM)
-        print(f"  [CDPExecutor] Extracting text...")
-        text = extract_page_text(cdp)
-        print(f"    TEXT  : {text[:120]}{'...' if len(text) > 120 else ''}")
-        results["text"].append(text)
+        # 3. Framebuffer capture — MSS/DXGI reads GPU compositor swap chain
+        #    This is exactly what the tutor pipeline does: capture what is DISPLAYED
+        print(f"  [MSS/DXGI] Capturing framebuffer (OS-level, undetectable)...")
+        frame_b64, mime = capture_screen_b64()
+        size_kb = round(len(base64.b64decode(frame_b64)) / 1024, 1)
+        print(f"    Frame size  : {size_kb} KB  mime={mime}")
+        results["frames"].append(frame_b64)
 
-        print(f"  [CDPExecutor] Extracting main image URL...")
-        image_url = extract_main_image(cdp)
-        if image_url:
-            print(f"    IMAGE : {image_url[:90]}{'...' if len(image_url) > 90 else ''}")
-        else:
-            print(f"    IMAGE : (none found — Wikipedia may have changed layout)")
-        results["images"].append(image_url)
+        # 4. Gemini vision analyses the captured screen frame
+        if i > 1:
+            print(f"  [Gemini] Waiting 6s (free-tier rate limit)...")
+            time.sleep(6)
+        print(f"  [Gemini] Analysing captured screen frame...")
+        answer = annotate_image_b64(
+            frame_b64,
+            mime,
+            task["question"],
+            task["options"],
+            context=(
+                "This is a screenshot of a Wikipedia page. "
+                "Look at the infobox image in the upper-right — that is the subject of the article. "
+                "Answer based only on what you see in that image."
+            ),
+        )
+        print(f"    ANSWER : {answer!r}  (expected: {task['expected']!r})")
+        results["answers"].append(answer)
+        if answer and task["expected"].lower() in answer.lower():
+            results["correct"] += 1
 
-        # Gemini vision classification (free tier: 10 RPM — wait 6s between calls)
-        if image_url:
-            if i > 1:
-                print(f"  [Gemini ] Waiting 6s (free-tier rate limit)...")
-                time.sleep(6)
-            print(f"  [Gemini ] Classifying image...")
-            answer = annotate_image(image_url, task["question"], task["options"])
-            print(f"    ANSWER: {answer!r}  (expected: {task['expected']!r})")
-            results["answers"].append(answer)
-            if answer and task["expected"].lower() in answer.lower():
-                results["correct"] += 1
-        else:
-            print(f"  [Gemini ] Skipped (no image URL extracted)")
-            results["answers"].append(None)
-
-        # Brief pause between tasks (human rhythm)
         if i < len(ANNOTATION_TASKS):
             time.sleep(1.5)
 
     return results
 
 
-def run_video_extraction(page, mouse, cdp) -> list:
-    """Navigate to a video-rich page and extract video URLs via CDPExecutor."""
+def run_video_capture(page, mouse) -> dict:
+    """
+    Video pipeline:
+      Playwright navigates to a page with video
+      → start_video_capture() begins DXcam screen recording
+      → Playwright clicks Play (simulated human action)
+      → stop_video_capture() encodes recorded frames to MP4
+      → upload_video() sends to Gemini Files API
+      → analyse_video() returns Gemini's description of the screen recording
+    """
+    # Import server functions directly — they work as plain Python functions
+    from capture_mcp.server import start_video_capture, stop_video_capture
+    from gemini_mcp._gemini import upload_video, analyse_video
+
     print(f"\n{'—' * 56}")
-    print(f"[Video extraction] {VIDEO_TASK['name']}")
+    print(f"[Video task] {VIDEO_TASK['name']}")
     print(f"  URL: {VIDEO_TASK['url']}")
 
     print(f"  [Playwright] Navigating browser...")
     page.goto(VIDEO_TASK["url"], wait_until="domcontentloaded")
-    time.sleep(3.0)
+    time.sleep(2.5)
 
-    # Scroll down to trigger video lazy-loading
-    wx  = page.evaluate("window.screenX")
-    wy  = page.evaluate("window.screenY")
-    ch  = page.evaluate("window.outerHeight - window.innerHeight")
+    # Scroll to bring video element into view
     cx, cy = mouse.position
+    wx       = page.evaluate("window.screenX")
+    wy       = page.evaluate("window.screenY")
+    ch       = page.evaluate("window.outerHeight - window.innerHeight")
     center_x = wx + page.evaluate("window.innerWidth") // 2
     center_y = wy + ch + page.evaluate("window.innerHeight") // 2
     smooth_move(mouse, cx, cy, center_x, center_y)
     time.sleep(0.3)
 
-    # Scroll through the page to trigger lazy video loads
-    for delta in [400, 600, 800, 600]:
-        page.evaluate(f"window.scrollBy(0, {delta})")
-        time.sleep(0.6)
+    # Scroll down to where the video element sits on the W3Schools page
+    for delta in [300, 400, 300]:
+        page.keyboard.press("ArrowDown")
+        time.sleep(0.3)
+    page.evaluate("window.scrollBy(0, 600)")
+    time.sleep(1.0)
 
-    print(f"  [CDPExecutor] Extracting video URLs...")
-    video_urls = extract_video_urls(cdp)
+    clip_path = "C:/tmp/annotation_video_demo.mp4"
+    os.makedirs("C:/tmp", exist_ok=True)
 
-    if video_urls:
-        print(f"    Found {len(video_urls)} video URL(s):")
-        for u in video_urls[:5]:
-            print(f"      VIDEO : {u[:100]}{'...' if len(u) > 100 else ''}")
-    else:
-        print(f"    No <video> elements found on this page.")
-        print(f"    (Wikipedia Animation page may not have inline video — checking for iframes...)")
-        # Try extracting iframe sources that might contain video
-        iframes = cdp.eval_js("""
-            Array.from(document.querySelectorAll('iframe[src]'))
-                .map(function(f){ return f.src; })
-                .filter(function(s){ return /youtube|vimeo|video/i.test(s); })
-                .slice(0,3)
-        """) or []
-        if iframes:
-            print(f"    Video iframes found:")
-            for u in iframes:
-                print(f"      IFRAME: {u[:100]}")
-            video_urls = iframes
+    # 1. Start DXcam screen recording (captures GPU framebuffer at 15fps)
+    rec_status = start_video_capture(fps=15)
+    print(f"  [DXcam] {rec_status}")
 
-    return video_urls
+    if "ERROR" in str(rec_status):
+        print("  [DXcam] DXcam unavailable — using still-frame capture as fallback")
+        # Fallback: capture a still frame of the video page
+        frame_b64, mime = capture_screen_b64()
+        size_kb = round(len(base64.b64decode(frame_b64)) / 1024, 1)
+        print(f"  [MSS/DXGI] Still frame captured: {size_kb} KB")
+        return {
+            "mode": "still_fallback",
+            "frame_b64": frame_b64,
+            "mime": mime,
+            "clip_path": None,
+            "gemini_uri": None,
+        }
+
+    # 2. Playwright clicks Play — simulated human presses the play button
+    print(f"  [Playwright] Clicking play on video...")
+    try:
+        # Try clicking the video element directly (triggers browser play)
+        video_handle = page.locator("video").first
+        video_handle.click()
+        print(f"  [Playwright] Video element clicked")
+    except Exception as e:
+        print(f"  [Playwright] Video click via locator failed ({e}) — using keyboard shortcut")
+        # If the page has focus on the video, spacebar plays it
+        page.keyboard.press("Space")
+
+    # 3. Let video play for 8 seconds while DXcam records
+    print(f"  [DXcam] Recording 8 seconds of playback...")
+    time.sleep(8.0)
+
+    # 4. Stop recording and encode MP4
+    result_path = stop_video_capture(output_path=clip_path)
+    print(f"  [DXcam] Recording stopped: {result_path}")
+
+    if "ERROR" in str(result_path):
+        print(f"  [DXcam] Recording failed: {result_path}")
+        return {"mode": "video_capture_failed", "error": result_path, "clip_path": None}
+
+    file_size = os.path.getsize(result_path) if os.path.exists(result_path) else 0
+    print(f"  [DXcam] MP4 saved: {result_path} ({file_size / 1024:.0f} KB)")
+
+    # 5. Upload to Gemini Files API
+    print(f"  [Gemini] Uploading screen recording to Gemini Files API...")
+    upload_info = upload_video(result_path)
+    if "error" in upload_info:
+        print(f"  [Gemini] Upload failed: {upload_info['error']}")
+        return {"mode": "upload_failed", "error": upload_info["error"], "clip_path": result_path}
+
+    print(f"  [Gemini] Upload complete: {upload_info.get('uri')} ({upload_info.get('upload_ms')}ms)")
+
+    # 6. Gemini analyses the recorded video
+    print(f"  [Gemini] Analysing screen recording...")
+    analysis = analyse_video(
+        upload_info["uri"],
+        (
+            "This is a screen recording of a web browser showing an HTML5 video tutorial page. "
+            "Describe: (1) what web page is shown, (2) what video content is visible or playing, "
+            "(3) what text or UI elements you can see. Be specific."
+        ),
+    )
+
+    gemini_text = analysis.get("text", "") if isinstance(analysis, dict) else str(analysis)
+    print(f"  [Gemini] Analysis: {gemini_text[:200]}{'...' if len(gemini_text) > 200 else ''}")
+
+    return {
+        "mode": "video_capture",
+        "clip_path": result_path,
+        "gemini_uri": upload_info.get("uri"),
+        "gemini_analysis": gemini_text,
+    }
 
 
 def main():
     from playwright.sync_api import sync_playwright
     from pynput.mouse import Controller
-    from careerbridge.cdp_executor import CDPExecutor
 
     print(_BAR)
-    print("REAL-WORLD ANNOTATION PIPELINE DEMO")
-    print("  Playwright  : browser navigation (visible window)")
-    print("  pynput      : physical OS mouse movement")
-    print("  CDPExecutor : text + image + video extraction (our system)")
-    print("  Gemini      : vision classification")
+    print("REAL-WORLD ANNOTATION PIPELINE — FRAMEBUFFER EXTRACTION")
+    print(_BAR)
+    print("  Playwright  : browser navigation (simulated human operator)")
+    print("  pynput      : physical OS mouse movement (isTrusted=true)")
+    print("  MSS/DXGI    : OS-level framebuffer capture (NOT CDP/DOM)")
+    print("  Gemini      : vision analysis of captured screen frames")
+    print("  Output      : text answer only — system never touches the page")
     print(_BAR)
 
     mouse = Controller()
 
     with sync_playwright() as p:
-        print("\n[Setup] Launching visible Chromium browser...")
+        print("\n[Setup] Launching visible Chromium browser (no CDP debug port)...")
         browser = p.chromium.launch(
             headless=False,
             args=[
-                f"--remote-debugging-port=9222",
                 "--start-maximized",
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-extensions",
                 "--disable-background-networking",
+                # NOTE: no --remote-debugging-port — we use framebuffer capture, not CDP
             ],
         )
         context = browser.new_context(no_viewport=True)
-        page    = context.new_page()
+        page = context.new_page()
         page.goto("about:blank")
         time.sleep(1.0)
-
-        # CDPExecutor connects to the same browser Playwright opened
-        print("[Setup] CDPExecutor connecting to CDP port 9222...")
-        cdp = CDPExecutor()
-        cdp.connect(port=9222)
-        print("[Setup] Connected. Starting annotation loop.\n")
+        print("[Setup] Browser ready. Starting framebuffer annotation loop.\n")
 
         # ── Main annotation loop ─────────────────────────────────────────────
-        loop_results = run_annotation_loop(page, mouse, cdp)
+        loop_results = run_annotation_loop(page, mouse)
 
-        # ── Video URL extraction ─────────────────────────────────────────────
-        video_urls = run_video_extraction(page, mouse, cdp)
+        # ── Video capture pipeline ───────────────────────────────────────────
+        video_result = run_video_capture(page, mouse)
 
-        cdp.disconnect()
-        time.sleep(2.0)
+        time.sleep(1.5)
         browser.close()
 
     # ── Final summary ────────────────────────────────────────────────────────
@@ -313,42 +351,44 @@ def main():
     print("PIPELINE RESULTS SUMMARY")
     print(_BAR)
 
-    n_tasks = len(ANNOTATION_TASKS)
-    n_text  = sum(1 for t in loop_results["text"]   if t)
-    n_img   = sum(1 for u in loop_results["images"]  if u)
-    n_ans   = sum(1 for a in loop_results["answers"] if a)
-    n_ok    = loop_results["correct"]
+    n_tasks  = len(ANNOTATION_TASKS)
+    n_frames = sum(1 for f in loop_results["frames"] if f)
+    n_ans    = sum(1 for a in loop_results["answers"] if a)
+    n_ok     = loop_results["correct"]
 
-    print(f"  Annotation tasks  : {n_tasks}")
-    print(f"  Text extracted    : {n_text}/{n_tasks}")
-    print(f"  Images extracted  : {n_img}/{n_tasks}")
-    print(f"  Gemini answered   : {n_ans}/{n_tasks}")
-    print(f"  Correct answers   : {n_ok}/{n_ans if n_ans else n_tasks}")
-    print(f"  Video URLs found  : {len(video_urls)}")
+    print(f"  Annotation tasks     : {n_tasks}")
+    print(f"  Framebuffer captures : {n_frames}/{n_tasks}")
+    print(f"  Gemini answered      : {n_ans}/{n_tasks}")
+    print(f"  Correct answers      : {n_ok}/{n_ans if n_ans else n_tasks}")
     print()
 
-    for i, (task, text, img, ans) in enumerate(zip(
+    for i, (task, frame, ans) in enumerate(zip(
         ANNOTATION_TASKS,
-        loop_results["text"],
-        loop_results["images"],
+        loop_results["frames"],
         loop_results["answers"],
     ), 1):
-        status = "OK" if ans else "SKIP"
-        match  = " (CORRECT)" if ans and task["expected"].lower() in ans.lower() else ""
-        print(f"  [{i}] {task['name']:<18} text={bool(text)} img={bool(img)} "
-              f"answer={ans!r}{match}")
-
-    if video_urls:
-        print(f"\n  [V] Video URLs:")
-        for u in video_urls[:3]:
-            print(f"      {u[:90]}")
+        match = " (CORRECT)" if ans and task["expected"].lower() in ans.lower() else ""
+        print(f"  [{i}] {task['name']:<18} captured={bool(frame)} answer={ans!r}{match}")
 
     print()
-    all_ok = n_text == n_tasks and n_img > 0 and n_ans > 0
+    mode = video_result.get("mode", "unknown")
+    print(f"  [V] Video mode: {mode}")
+    if video_result.get("clip_path"):
+        print(f"      Clip path  : {video_result['clip_path']}")
+    if video_result.get("gemini_uri"):
+        print(f"      Gemini URI : {video_result['gemini_uri']}")
+    if video_result.get("gemini_analysis"):
+        snippet = video_result["gemini_analysis"][:120]
+        print(f"      Analysis   : {snippet}...")
+    elif video_result.get("frame_b64"):
+        print(f"      Still frame captured (DXcam not available — MSS fallback)")
+
+    print()
+    all_ok = n_frames == n_tasks and n_ans > 0
     if all_ok:
-        print("SUCCESS — annotation pipeline extracted text + images + video from real sites")
+        print("SUCCESS — framebuffer extraction pipeline: captured + Gemini-analysed real browser content")
     else:
-        print("PARTIAL — some extractions succeeded (see details above)")
+        print("PARTIAL — some captures/analyses succeeded (see details above)")
     print(_BAR)
 
 
