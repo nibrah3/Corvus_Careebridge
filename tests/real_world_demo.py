@@ -184,18 +184,56 @@ def run_annotation_loop(page, mouse) -> dict:
     return results
 
 
+def _mss_record_frames(duration_s: float, fps: int = 10) -> list:
+    """
+    Capture screen frames via MSS for `duration_s` seconds at `fps` frames/sec.
+    Returns list of numpy BGR arrays suitable for cv2.VideoWriter.
+    """
+    import numpy as np
+    from capture_mcp._backend_mss import capture as mss_capture
+    from PIL import Image
+    import io as _io
+
+    frames = []
+    interval = 1.0 / fps
+    deadline = time.monotonic() + duration_s
+    while time.monotonic() < deadline:
+        t0 = time.monotonic()
+        png = mss_capture()
+        pil = Image.open(_io.BytesIO(png)).convert("RGB")
+        bgr = np.array(pil)[:, :, ::-1]  # RGB → BGR for OpenCV
+        frames.append(bgr)
+        elapsed = time.monotonic() - t0
+        remaining = interval - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+    return frames
+
+
+def _frames_to_mp4(frames: list, output_path: str, fps: int = 10) -> str:
+    """Encode list of BGR numpy frames to MP4. Returns output_path."""
+    import cv2
+    if not frames:
+        raise RuntimeError("No frames to encode")
+    h, w = frames[0].shape[:2]
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+    for f in frames:
+        writer.write(f)
+    writer.release()
+    return output_path
+
+
 def run_video_capture(page, mouse) -> dict:
     """
     Video pipeline:
       Playwright navigates to a page with video
-      → start_video_capture() begins DXcam screen recording
+      → MSS captures screen frames in a loop (no DXcam dependency)
       → Playwright clicks Play (simulated human action)
-      → stop_video_capture() encodes recorded frames to MP4
+      → Frames assembled into MP4 via OpenCV
       → upload_video() sends to Gemini Files API
       → analyse_video() returns Gemini's description of the screen recording
     """
-    # Import server functions directly — they work as plain Python functions
-    from capture_mcp.server import start_video_capture, stop_video_capture
     from gemini_mcp._gemini import upload_video, analyse_video
 
     print(f"\n{'—' * 56}")
@@ -210,77 +248,59 @@ def run_video_capture(page, mouse) -> dict:
     cx, cy = mouse.position
     wx       = page.evaluate("window.screenX")
     wy       = page.evaluate("window.screenY")
-    ch       = page.evaluate("window.outerHeight - window.innerHeight")
+    ch_off   = page.evaluate("window.outerHeight - window.innerHeight")
     center_x = wx + page.evaluate("window.innerWidth") // 2
-    center_y = wy + ch + page.evaluate("window.innerHeight") // 2
+    center_y = wy + ch_off + page.evaluate("window.innerHeight") // 2
     smooth_move(mouse, cx, cy, center_x, center_y)
     time.sleep(0.3)
 
     # Scroll down to where the video element sits on the W3Schools page
-    for delta in [300, 400, 300]:
-        page.keyboard.press("ArrowDown")
-        time.sleep(0.3)
     page.evaluate("window.scrollBy(0, 600)")
     time.sleep(1.0)
 
     clip_path = "C:/tmp/annotation_video_demo.mp4"
     os.makedirs("C:/tmp", exist_ok=True)
 
-    # 1. Start DXcam screen recording (captures GPU framebuffer at 15fps)
-    rec_status = start_video_capture(fps=15)
-    print(f"  [DXcam] {rec_status}")
-
-    if "ERROR" in str(rec_status):
-        print("  [DXcam] DXcam unavailable — using still-frame capture as fallback")
-        # Fallback: capture a still frame of the video page
-        frame_b64, mime = capture_screen_b64()
-        size_kb = round(len(base64.b64decode(frame_b64)) / 1024, 1)
-        print(f"  [MSS/DXGI] Still frame captured: {size_kb} KB")
-        return {
-            "mode": "still_fallback",
-            "frame_b64": frame_b64,
-            "mime": mime,
-            "clip_path": None,
-            "gemini_uri": None,
-        }
-
-    # 2. Playwright clicks Play — simulated human presses the play button
+    # 1. Playwright clicks Play — simulated human presses the play button
     print(f"  [Playwright] Clicking play on video...")
     try:
-        # Try clicking the video element directly (triggers browser play)
         video_handle = page.locator("video").first
+        video_handle.scroll_into_view_if_needed()
+        time.sleep(0.3)
         video_handle.click()
         print(f"  [Playwright] Video element clicked")
     except Exception as e:
-        print(f"  [Playwright] Video click via locator failed ({e}) — using keyboard shortcut")
-        # If the page has focus on the video, spacebar plays it
+        print(f"  [Playwright] Video click via locator failed ({e}) — using Space key")
         page.keyboard.press("Space")
 
-    # 3. Let video play for 8 seconds while DXcam records
-    print(f"  [DXcam] Recording 8 seconds of playback...")
-    time.sleep(8.0)
+    time.sleep(0.5)  # brief pause so video actually starts before recording
 
-    # 4. Stop recording and encode MP4
-    result_path = stop_video_capture(output_path=clip_path)
-    print(f"  [DXcam] Recording stopped: {result_path}")
+    # 2. MSS captures screen at 10fps for 8 seconds while video plays
+    RECORD_FPS = 10
+    RECORD_S   = 8
+    print(f"  [MSS] Recording {RECORD_S}s at {RECORD_FPS}fps via MSS framebuffer...")
+    frames = _mss_record_frames(duration_s=RECORD_S, fps=RECORD_FPS)
+    print(f"  [MSS] Captured {len(frames)} frames")
 
-    if "ERROR" in str(result_path):
-        print(f"  [DXcam] Recording failed: {result_path}")
-        return {"mode": "video_capture_failed", "error": result_path, "clip_path": None}
+    if not frames:
+        return {"mode": "mss_capture_failed", "error": "no frames", "clip_path": None}
 
-    file_size = os.path.getsize(result_path) if os.path.exists(result_path) else 0
-    print(f"  [DXcam] MP4 saved: {result_path} ({file_size / 1024:.0f} KB)")
+    # 3. Encode frames → MP4
+    print(f"  [OpenCV] Encoding {len(frames)} frames → {clip_path}")
+    _frames_to_mp4(frames, clip_path, fps=RECORD_FPS)
+    file_size = os.path.getsize(clip_path)
+    print(f"  [OpenCV] MP4 saved: {clip_path} ({file_size // 1024} KB)")
 
-    # 5. Upload to Gemini Files API
+    # 4. Upload to Gemini Files API
     print(f"  [Gemini] Uploading screen recording to Gemini Files API...")
-    upload_info = upload_video(result_path)
+    upload_info = upload_video(clip_path)
     if "error" in upload_info:
         print(f"  [Gemini] Upload failed: {upload_info['error']}")
-        return {"mode": "upload_failed", "error": upload_info["error"], "clip_path": result_path}
+        return {"mode": "upload_failed", "error": upload_info["error"], "clip_path": clip_path}
 
     print(f"  [Gemini] Upload complete: {upload_info.get('uri')} ({upload_info.get('upload_ms')}ms)")
 
-    # 6. Gemini analyses the recorded video
+    # 5. Gemini analyses the recorded video
     print(f"  [Gemini] Analysing screen recording...")
     analysis = analyse_video(
         upload_info["uri"],
@@ -292,11 +312,12 @@ def run_video_capture(page, mouse) -> dict:
     )
 
     gemini_text = analysis.get("text", "") if isinstance(analysis, dict) else str(analysis)
-    print(f"  [Gemini] Analysis: {gemini_text[:200]}{'...' if len(gemini_text) > 200 else ''}")
+    print(f"  [Gemini] Analysis: {gemini_text[:300]}{'...' if len(gemini_text) > 300 else ''}")
 
     return {
-        "mode": "video_capture",
-        "clip_path": result_path,
+        "mode": "mss_video_capture",
+        "clip_path": clip_path,
+        "frame_count": len(frames),
         "gemini_uri": upload_info.get("uri"),
         "gemini_analysis": gemini_text,
     }
