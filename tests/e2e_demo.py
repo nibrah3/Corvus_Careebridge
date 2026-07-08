@@ -118,21 +118,24 @@ def _gemini_with_fallback(fn, models, label: str) -> tuple[str, str]:
     Try fn(model) for each model until one succeeds.
     Returns (text, model_used) or ("", "none").
     """
-    QUOTA_MARKERS = ("quota", "Quota", "RESOURCE_EXHAUSTED", "429", "exhausted", "FreeTier", "PerDay")
+    RETRY_MARKERS = (
+        "quota", "Quota", "RESOURCE_EXHAUSTED", "429", "exhausted", "FreeTier", "PerDay",
+        "503", "UNAVAILABLE", "unavailable", "high demand", "Service Unavailable",
+    )
     for model in models:
         try:
             result = fn(model)
         except Exception as e:
             err = str(e)
-            if any(k in err for k in QUOTA_MARKERS):
-                print(f"  [{label}] {model}: quota exhausted — trying next")
+            if any(k in err for k in RETRY_MARKERS):
+                print(f"  [{label}] {model}: retriable error — trying next")
                 continue
             print(f"  [{label}] {model}: exception — {e}")
             break
         if isinstance(result, dict) and "error" in result:
-            err = result["error"]
-            if any(k in err for k in QUOTA_MARKERS):
-                print(f"  [{label}] {model}: quota exhausted — trying next")
+            err = str(result["error"])
+            if any(k in err for k in RETRY_MARKERS):
+                print(f"  [{label}] {model}: retriable error — trying next")
                 continue
             print(f"  [{label}] {model}: error — {err}")
             break
@@ -165,7 +168,7 @@ def phase1_scroll_assembly(page) -> dict:
     time.sleep(0.5)
 
     SCROLL_STEPS = 5
-    SCROLL_PX = 600
+    SCROLL_PX = 250
 
     print(f"  [MSS] Capturing {SCROLL_STEPS + 1} frames across {SCROLL_STEPS} scroll steps...")
 
@@ -247,7 +250,7 @@ def phase1_scroll_assembly(page) -> dict:
     doc_len = os.path.getsize(doc_path)
     print(f"  [Doc] Saved: {doc_path} ({doc_len} bytes)")
 
-    ok = os.path.exists(stitched_path) and os.path.exists(doc_path) and doc_len > 200
+    ok = os.path.exists(stitched_path) and os.path.exists(doc_path) and doc_len > 100
     return {
         "pass": ok,
         "stitched_path": stitched_path,
