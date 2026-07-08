@@ -113,37 +113,89 @@ def _detect_shift(prev_gray, curr_gray, min_shift: int = 20, max_shift: int = 40
     return None
 
 
-def _mss_record_frames(duration_s: float, fps: int = 10) -> list:
-    import io as _io
+def _dxcam_record_frames(duration_s: float, fps: int = 10) -> list[tuple[float, np.ndarray]]:
+    """Record screen using DXGI Desktop Duplication. Returns [(wall_time, bgr_frame)]."""
+    import dxcam
+    cam = dxcam.create(output_color="BGR")
+    frames_ts: list[tuple[float, np.ndarray]] = []
+    try:
+        cam.start(target_fps=fps, video_mode=True)
+        end = time.monotonic() + duration_s
+        while time.monotonic() < end:
+            frame = cam.get_latest_frame()
+            if frame is not None:
+                frames_ts.append((time.monotonic(), frame.copy()))
+    finally:
+        cam.stop()
+        cam.release()
+    return frames_ts
+
+
+def _encode_muxed_mp4(
+    frames_ts: list[tuple[float, np.ndarray]],
+    audio_chunks: list,
+    output_path: str,
+) -> str:
+    """Encode a PTS-accurate MP4 with audio muxed in. Uses actual capture timestamps."""
+    import av
     import numpy as np
-    from PIL import Image
-    from capture_mcp._backend_mss import capture as mss_capture
-    frames = []
-    interval = 1.0 / fps
-    deadline = time.monotonic() + duration_s
-    while time.monotonic() < deadline:
-        t0 = time.monotonic()
-        png = mss_capture()
-        pil = Image.open(_io.BytesIO(png)).convert("RGB")
-        bgr = np.array(pil)[:, :, ::-1]
-        frames.append(bgr)
-        elapsed = time.monotonic() - t0
-        remaining = interval - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
-    return frames
 
-
-def _frames_to_mp4(frames: list, output_path: str, fps: int = 10) -> str:
-    import cv2
-    if not frames:
+    if not frames_ts:
         raise RuntimeError("No frames to encode")
-    h, w = frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
-    for f in frames:
-        writer.write(f)
-    writer.release()
+
+    h, w = frames_ts[0][1].shape[:2]
+    sample_rate = audio_chunks[0]["sample_rate"] if audio_chunks else 44100
+    n_ch = audio_chunks[0]["channels"] if audio_chunks else 2
+
+    # Actual fps derived from wall-clock timestamps → video duration matches audio duration
+    if len(frames_ts) >= 2:
+        actual_dur = frames_ts[-1][0] - frames_ts[0][0]
+        actual_fps = (len(frames_ts) - 1) / max(actual_dur, 0.1)
+    else:
+        actual_fps = 10.0
+    actual_fps = max(1.0, min(actual_fps, 60.0))
+
+    out = av.open(output_path, "w", format="mp4")
+
+    v = out.add_stream("libx264", rate=int(round(actual_fps)))
+    v.width = w
+    v.height = h
+    v.pix_fmt = "yuv420p"
+    v.options = {"preset": "ultrafast", "crf": "23"}
+
+    a = out.add_stream("aac", rate=sample_rate)
+    a.channels = n_ch
+
+    for idx, (_, bgr) in enumerate(frames_ts):
+        vf = av.VideoFrame.from_ndarray(bgr[:, :, ::-1].copy(), format="rgb24")
+        vf.pts = idx
+        for pkt in v.encode(vf):
+            out.mux(pkt)
+    for pkt in v.encode(None):
+        out.mux(pkt)
+
+    if audio_chunks:
+        all_pcm = b"".join(c["data"] for c in audio_chunks)
+        pcm = np.frombuffer(all_pcm, dtype=np.int16)
+        n_total = len(pcm) // n_ch
+        pcm_f = pcm[: n_total * n_ch].reshape(n_total, n_ch).astype(np.float32) / 32768.0
+        layout = "stereo" if n_ch >= 2 else "mono"
+        CHUNK = 1024  # AAC frame size
+        pts = 0
+        for i in range(0, n_total, CHUNK):
+            samp = pcm_f[i : i + CHUNK]
+            if len(samp) < CHUNK:
+                samp = np.pad(samp, ((0, CHUNK - len(samp)), (0, 0)))
+            af = av.AudioFrame.from_ndarray(samp.T, format="fltp", layout=layout)
+            af.sample_rate = sample_rate
+            af.pts = pts
+            pts += CHUNK
+            for pkt in a.encode(af):
+                out.mux(pkt)
+        for pkt in a.encode(None):
+            out.mux(pkt)
+
+    out.close()
     return output_path
 
 
