@@ -1,11 +1,11 @@
 """
-telegram_claude_bridge.py — Forward Telegram messages to Claude Code CLI.
+telegram_claude_bridge.py — Forward Telegram DMs to Claude Code CLI.
 
-Every admin message is sent to `claude --print "text"` as a one-shot subprocess
-call. The response is chunked and sent back to Telegram.
+Each admin DM is forwarded to `claude --print` as a subprocess.
+Conversation history is kept in-process so replies have context without
+needing --continue (which conflicts with the active desktop session).
 
-Streaming mode (--stream): uses `--output-format stream-json` and edits the
-Telegram message in-place as tokens arrive — gives real-time typing effect.
+Streaming mode (--stream): edits the Telegram message live as tokens arrive.
 
 Usage:
   python telegram_claude_bridge.py           # plain mode
@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from collections import deque
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -54,16 +55,47 @@ _CWD = str(ROOT)
 _TIMEOUT = 300          # max seconds per claude call (5 min for complex tasks)
 _TG_MAX = 3800          # leave room below Telegram's 4096-char limit
 _STREAM_INTERVAL = 1.5  # seconds between live edit_message updates
+_HISTORY_TURNS = 6      # number of recent Q&A pairs to include as context
 _ADMINS: list[int] = []
 
-# Check if we're in streaming mode
 _STREAM_MODE = "--stream" in sys.argv
+
+# ── In-process conversation history ──────────────────────────────────────────
+# Keeps last N turns so each claude call has context without --continue.
+# Keys are chat_id; values are deque of (user_msg, assistant_reply) tuples.
+
+_history: dict[int, deque[tuple[str, str]]] = {}
+_history_lock = threading.Lock()
+
+
+def _build_prompt(chat_id: int, user_text: str) -> str:
+    """Prepend recent conversation history so Claude has context."""
+    with _history_lock:
+        turns = list(_history.get(chat_id, []))
+
+    if not turns:
+        return user_text
+
+    lines = ["[Previous conversation]\n"]
+    for u, a in turns:
+        lines.append(f"User: {u}")
+        lines.append(f"Assistant: {a}\n")
+    lines.append("[Current message]")
+    lines.append(f"User: {user_text}")
+    return "\n".join(lines)
+
+
+def _record_turn(chat_id: int, user_text: str, reply: str) -> None:
+    with _history_lock:
+        if chat_id not in _history:
+            _history[chat_id] = deque(maxlen=_HISTORY_TURNS)
+        _history[chat_id].append((user_text, reply))
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
 def _chunk(text: str, size: int = _TG_MAX) -> list[str]:
-    """Split text into ≤size-char chunks, preferring line boundaries."""
     if len(text) <= size:
         return [text]
     chunks: list[str] = []
@@ -79,59 +111,31 @@ def _chunk(text: str, size: int = _TG_MAX) -> list[str]:
     return chunks
 
 
-def _escape_html(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
 def _send_chunks(chat_id: int, text: str) -> None:
-    """Send potentially long text as one or more Telegram messages."""
+    """Send text as one or more plain Telegram messages (no HTML parse_mode)."""
     chunks = _chunk(text)
     for i, chunk in enumerate(chunks):
         prefix = f"[{i+1}/{len(chunks)}]\n" if len(chunks) > 1 else ""
-        # Wrap in <pre> so monospace code/output looks right
-        escaped = _escape_html(chunk)
-        send_message(chat_id, f"{prefix}<pre>{escaped}</pre>")
+        send_message(chat_id, prefix + chunk, parse_mode=None)
 
 
-# ── Claude invocation — plain mode ───────────────────────────────────────────
-
+# ── Claude invocation ─────────────────────────────────────────────────────────
 
 _CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write"
-
-# Full path to claude CLI — npm-installed scripts aren't on Python subprocess PATH
 _CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
-
-# Session file that pins the conversation ID for cross-message continuity.
-# All Telegram DMs continue the same Claude session rather than starting fresh.
-_SESSION_FILE = ROOT / ".telegram_session_id"
-
-
-def _resume_args() -> list[str]:
-    """Return --resume SESSION_ID args if a pinned session exists, else --continue."""
-    if _SESSION_FILE.exists():
-        sid = _SESSION_FILE.read_text().strip()
-        if sid:
-            return ["--resume", sid]
-    return ["--continue"]
 
 
 def _subprocess_env() -> dict:
-    """
-    Build subprocess env that forces claude CLI into subscription mode.
-    Remove ANTHROPIC_API_KEY entirely — if it's set (even empty), claude
-    tries API-credit mode and fails. Subscription (OAuth) requires it absent.
-    """
+    """Force claude CLI into subscription mode by removing ANTHROPIC_API_KEY."""
     env = os.environ.copy()
     env.pop("ANTHROPIC_API_KEY", None)
     return env
 
 
 def _ask_claude_plain(prompt: str) -> str:
-    """Blocking call: `claude --print --continue --output-format json <prompt>` → response text."""
     result = subprocess.run(
         [
             _CLAUDE_BIN, "--print",
-            *_resume_args(),
             "--output-format", "json",
             "--allowedTools", _CLAUDE_TOOLS,
             "--permission-mode", "acceptEdits",
@@ -140,41 +144,26 @@ def _ask_claude_plain(prompt: str) -> str:
         cwd=_CWD,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=_TIMEOUT,
         env=_subprocess_env(),
     )
     raw = (result.stdout or "").strip()
     if result.returncode != 0 and not raw:
         err = (result.stderr or "").strip()
-        if err:
-            return f"Error (exit {result.returncode}):\n{err[:600]}"
-        return f"Claude exited with code {result.returncode} (no output)."
+        return f"Error (exit {result.returncode}):\n{err[:600]}" if err else \
+               f"Claude exited with code {result.returncode} (no output)."
     try:
         data = json.loads(raw)
-        sid = data.get("session_id")
-        if sid:
-            _SESSION_FILE.write_text(sid)
         return (data.get("result") or data.get("text") or raw or "(no output)").strip()
     except json.JSONDecodeError:
         return raw or "(Claude returned no output.)"
 
 
-# ── Claude invocation — streaming mode ───────────────────────────────────────
-
-
-def _ask_claude_stream(
-    prompt: str,
-    on_update: "Callable[[str], None]",
-) -> str:
-    """
-    Stream `claude --print --output-format stream-json <prompt>`.
-    Calls on_update(accumulated_text) periodically as tokens arrive.
-    Returns the final complete text.
-    """
+def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]") -> str:
     proc = subprocess.Popen(
         [
             _CLAUDE_BIN, "--print",
-            *_resume_args(),
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
@@ -186,6 +175,7 @@ def _ask_claude_stream(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
         env=_subprocess_env(),
     )
 
@@ -203,10 +193,8 @@ def _ask_claude_stream(
                 kind = obj.get("type", "")
 
                 if kind == "text":
-                    # Simple text event (non-partial mode)
                     accumulated += obj.get("text", "")
                 elif kind == "stream_event":
-                    # --include-partial-messages token-level events
                     inner = obj.get("event", {})
                     if inner.get("type") == "content_block_delta":
                         delta = inner.get("delta", {})
@@ -214,10 +202,7 @@ def _ask_claude_stream(
                             accumulated += delta.get("text", "")
                 elif kind == "result" and obj.get("subtype") == "success":
                     final_result = obj.get("result", accumulated).strip()
-                    sid = obj.get("session_id")
-                    if sid:
-                        _SESSION_FILE.write_text(sid)
-                    break  # done — don't read further
+                    break
 
                 now = time.monotonic()
                 if accumulated and now - last_update >= _STREAM_INTERVAL:
@@ -235,60 +220,61 @@ def _ask_claude_stream(
     return final_result or accumulated.strip() or "(Claude returned no output.)"
 
 
-# ── Message handler ───────────────────────────────────────────────────────────
+# ── Message handlers ──────────────────────────────────────────────────────────
 
 
-def _handle_plain(chat_id: int, text: str) -> None:
-    send_message(chat_id, "Thinking...")
+def _handle_plain(chat_id: int, user_text: str) -> None:
+    send_message(chat_id, "Thinking...", parse_mode=None)
+    prompt = _build_prompt(chat_id, user_text)
     try:
-        answer = _ask_claude_plain(text)
+        answer = _ask_claude_plain(prompt)
     except subprocess.TimeoutExpired:
-        send_message(chat_id, f"Timed out after {_TIMEOUT}s.")
+        send_message(chat_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
         return
     except Exception as exc:
         log.exception("Claude call failed")
-        send_message(chat_id, f"Error: {_escape_html(str(exc))}")
+        send_message(chat_id, f"Error: {exc}", parse_mode=None)
         return
+    _record_turn(chat_id, user_text, answer)
     _send_chunks(chat_id, answer)
 
 
-def _handle_stream(chat_id: int, text: str) -> None:
-    # Send placeholder and track its message_id for live edits
-    resp = send_message(chat_id, "Thinking...")
+def _handle_stream(chat_id: int, user_text: str) -> None:
+    resp = send_message(chat_id, "Thinking...", parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
         msg_id = resp["result"]["message_id"]
 
-    last_sent = [""]  # mutable cell for closure
+    last_sent = [""]
 
     def _update(accumulated: str) -> None:
-        if msg_id is None:
-            return
-        if accumulated == last_sent[0]:
+        if msg_id is None or accumulated == last_sent[0]:
             return
         preview = accumulated[-_TG_MAX:] if len(accumulated) > _TG_MAX else accumulated
         try:
-            edit_message(chat_id, msg_id, f"<pre>{_escape_html(preview)}</pre>")
+            edit_message(chat_id, msg_id, preview, parse_mode=None)
             last_sent[0] = accumulated
         except Exception:
-            pass  # edit might fail if content unchanged — that's fine
+            pass
 
+    prompt = _build_prompt(chat_id, user_text)
     try:
-        final = _ask_claude_stream(text, _update)
+        final = _ask_claude_stream(prompt, _update)
     except subprocess.TimeoutExpired:
         if msg_id:
-            edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.")
+            edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
         return
     except Exception as exc:
         log.exception("Claude stream failed")
         if msg_id:
-            edit_message(chat_id, msg_id, f"Error: {_escape_html(str(exc))}")
+            edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
         return
 
-    # Send final complete response (replace placeholder or send chunks)
+    _record_turn(chat_id, user_text, final)
+
     if msg_id and len(final) <= _TG_MAX:
         try:
-            edit_message(chat_id, msg_id, f"<pre>{_escape_html(final)}</pre>")
+            edit_message(chat_id, msg_id, final, parse_mode=None)
             return
         except Exception:
             pass
@@ -303,47 +289,37 @@ def _handle(msg: dict) -> None:
 
     log.info("chat=%s  %r", chat_id, text[:80])
 
-    # Bridge meta-commands
     lower = text.lower()
+
     if lower in ("/ping", "ping"):
         mode = "streaming" if _STREAM_MODE else "plain"
-        send_message(chat_id, f"Pong. Bridge alive ({mode} mode, timeout={_TIMEOUT}s).")
+        send_message(chat_id, f"Pong. Bridge alive ({mode} mode, timeout={_TIMEOUT}s).", parse_mode=None)
         return
 
-    if lower in ("/help", "help", "/help"):
-        sid = _SESSION_FILE.read_text().strip() if _SESSION_FILE.exists() else "none yet"
+    if lower == "/clearhistory":
+        with _history_lock:
+            _history.pop(chat_id, None)
+        send_message(chat_id, "Conversation history cleared. Starting fresh.", parse_mode=None)
+        return
+
+    if lower in ("/help", "help"):
         send_message(
             chat_id,
-            "<b>Telegram → Claude Code Bridge</b>\n\n"
-            "Type anything — it goes to Claude Code running in\n"
-            f"<code>{_CWD}</code>\n\n"
-            "<b>Meta commands:</b>\n"
+            "Telegram → Claude Code Bridge\n\n"
+            f"Working directory: {_CWD}\n\n"
+            "Commands:\n"
             "/ping — check bridge is alive\n"
-            "/session — show pinned session ID\n"
-            "/newsession — forget session, start fresh\n"
+            "/clearhistory — forget conversation, start fresh\n"
             "/help — this message\n\n"
-            "<b>Tips:</b>\n"
-            "• All DMs continue the same persistent session\n"
-            "• Claude remembers context from previous messages\n"
+            "Tips:\n"
+            "• Claude remembers the last few messages\n"
             "• Long responses are split into chunks\n"
-            f"• Session: <code>{sid[:20]}...</code>\n"
             f"• Timeout: {_TIMEOUT}s per call\n"
-            f"• Mode: {'streaming (live updates)' if _STREAM_MODE else 'plain (reply when done)'}",
+            f"• Mode: {'streaming' if _STREAM_MODE else 'plain'}",
+            parse_mode=None,
         )
         return
 
-    if lower == "/session":
-        sid = _SESSION_FILE.read_text().strip() if _SESSION_FILE.exists() else "none"
-        send_message(chat_id, f"Pinned session ID:\n<code>{sid}</code>")
-        return
-
-    if lower == "/newsession":
-        if _SESSION_FILE.exists():
-            _SESSION_FILE.unlink()
-        send_message(chat_id, "Session reset. Next message starts a fresh Claude context.")
-        return
-
-    # Forward to Claude
     if _STREAM_MODE:
         _handle_stream(chat_id, text)
     else:
@@ -364,9 +340,8 @@ def main() -> None:
         try:
             send_message(
                 cid,
-                f"Claude bridge online ({mode} mode).\n"
-                "Type anything to ask Claude Code.\n"
-                "/help for info, /ping to test.",
+                f"Corvus bridge online ({mode} mode).\nType anything to ask Claude.\n/help for commands.",
+                parse_mode=None,
             )
         except Exception:
             pass
