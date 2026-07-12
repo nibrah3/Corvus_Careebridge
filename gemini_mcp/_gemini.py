@@ -10,9 +10,12 @@ API key: GEMINI_API_KEY environment variable.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import time
 from pathlib import Path
+
+_UPLOAD_TIMEOUT = 90  # seconds — SDK upload call can block indefinitely without this
 
 _KEY_OVERRIDE: str | None = None
 
@@ -72,8 +75,13 @@ def upload_video(video_path: str) -> dict:
         if not path.exists():
             return {"error": f"File not found: {video_path}"}
 
-        t0       = time.monotonic()
-        uploaded = client.files.upload(file=str(path))
+        t0 = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(client.files.upload, file=str(path))
+            try:
+                uploaded = fut.result(timeout=_UPLOAD_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                return {"error": f"Gemini upload timed out after {_UPLOAD_TIMEOUT}s"}
 
         deadline = time.monotonic() + 120
         while uploaded.state.name != "ACTIVE":
