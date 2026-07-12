@@ -44,9 +44,11 @@ def _get(method: str, params: dict | None = None) -> dict:
 
 # ── Send ─────────────────────────────────────────────────────────────────────
 
-def send_message(chat_id: int | str, text: str, parse_mode: str = "HTML",
+def send_message(chat_id: int | str, text: str, parse_mode: str | None = "HTML",
                  reply_markup: dict | None = None) -> dict:
-    payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    payload: dict = {"chat_id": chat_id, "text": text}
+    if parse_mode is not None:
+        payload["parse_mode"] = parse_mode
     if reply_markup:
         payload["reply_markup"] = reply_markup
     return _post("sendMessage", **payload)
