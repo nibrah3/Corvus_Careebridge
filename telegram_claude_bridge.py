@@ -98,11 +98,26 @@ def _send_chunks(chat_id: int, text: str) -> None:
 
 _CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write"
 
+# Session file that pins the conversation ID for cross-message continuity.
+# All Telegram DMs continue the same Claude session rather than starting fresh.
+_SESSION_FILE = ROOT / ".telegram_session_id"
+
+
+def _resume_args() -> list[str]:
+    """Return --resume SESSION_ID args if a pinned session exists, else --continue."""
+    if _SESSION_FILE.exists():
+        sid = _SESSION_FILE.read_text().strip()
+        if sid:
+            return ["--resume", sid]
+    return ["--continue"]
+
+
 def _ask_claude_plain(prompt: str) -> str:
-    """Blocking call: `claude --print --output-format json <prompt>` → response text."""
+    """Blocking call: `claude --print --continue --output-format json <prompt>` → response text."""
     result = subprocess.run(
         [
             "claude", "--print",
+            *_resume_args(),
             "--output-format", "json",
             "--allowedTools", _CLAUDE_TOOLS,
             "--permission-mode", "acceptEdits",
