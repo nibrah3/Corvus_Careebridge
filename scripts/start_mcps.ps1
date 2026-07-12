@@ -18,7 +18,6 @@ $servers = @(
     @{ mod = "memory_mcp.server";    port = 8709 },
     @{ mod = "dom_mcp.server";       port = 8710 },
     @{ mod = "cdp_mcp.server";       port = 8712 },
-    @{ mod = "vps_mcp.server";       port = 8713 },
     @{ mod = "schools_mcp.server";    port = 8714 },
     @{ mod = "ixbrowser_mcp.server";  port = 8715 }
 )
