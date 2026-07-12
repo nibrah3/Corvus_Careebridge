@@ -295,6 +295,7 @@ def _handle(msg: dict) -> None:
         return
 
     if lower in ("/help", "help", "/help"):
+        sid = _SESSION_FILE.read_text().strip() if _SESSION_FILE.exists() else "none yet"
         send_message(
             chat_id,
             "<b>Telegram → Claude Code Bridge</b>\n\n"
@@ -302,13 +303,28 @@ def _handle(msg: dict) -> None:
             f"<code>{_CWD}</code>\n\n"
             "<b>Meta commands:</b>\n"
             "/ping — check bridge is alive\n"
+            "/session — show pinned session ID\n"
+            "/newsession — forget session, start fresh\n"
             "/help — this message\n\n"
             "<b>Tips:</b>\n"
-            "• Claude sees the full project directory\n"
+            "• All DMs continue the same persistent session\n"
+            "• Claude remembers context from previous messages\n"
             "• Long responses are split into chunks\n"
+            f"• Session: <code>{sid[:20]}...</code>\n"
             f"• Timeout: {_TIMEOUT}s per call\n"
             f"• Mode: {'streaming (live updates)' if _STREAM_MODE else 'plain (reply when done)'}",
         )
+        return
+
+    if lower == "/session":
+        sid = _SESSION_FILE.read_text().strip() if _SESSION_FILE.exists() else "none"
+        send_message(chat_id, f"Pinned session ID:\n<code>{sid}</code>")
+        return
+
+    if lower == "/newsession":
+        if _SESSION_FILE.exists():
+            _SESSION_FILE.unlink()
+        send_message(chat_id, "Session reset. Next message starts a fresh Claude context.")
         return
 
     # Forward to Claude
