@@ -96,22 +96,34 @@ def _send_chunks(chat_id: int, text: str) -> None:
 # ── Claude invocation — plain mode ───────────────────────────────────────────
 
 
+_CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write"
+
 def _ask_claude_plain(prompt: str) -> str:
-    """Blocking call: `claude --print <prompt>` → full response text."""
+    """Blocking call: `claude --print --output-format json <prompt>` → response text."""
     result = subprocess.run(
-        ["claude", "--print", prompt],
+        [
+            "claude", "--print",
+            "--output-format", "json",
+            "--allowedTools", _CLAUDE_TOOLS,
+            "--permission-mode", "acceptEdits",
+            prompt,
+        ],
         cwd=_CWD,
         capture_output=True,
         text=True,
         timeout=_TIMEOUT,
     )
-    output = (result.stdout or "").strip()
-    if result.returncode != 0 and not output:
+    raw = (result.stdout or "").strip()
+    if result.returncode != 0 and not raw:
         err = (result.stderr or "").strip()
         if err:
             return f"Error (exit {result.returncode}):\n{err[:600]}"
         return f"Claude exited with code {result.returncode} (no output)."
-    return output or "(Claude returned no output.)"
+    try:
+        data = json.loads(raw)
+        return (data.get("result") or data.get("text") or raw or "(no output)").strip()
+    except json.JSONDecodeError:
+        return raw or "(Claude returned no output.)"
 
 
 # ── Claude invocation — streaming mode ───────────────────────────────────────
@@ -127,7 +139,15 @@ def _ask_claude_stream(
     Returns the final complete text.
     """
     proc = subprocess.Popen(
-        ["claude", "--print", "--output-format", "stream-json", prompt],
+        [
+            "claude", "--print",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--allowedTools", _CLAUDE_TOOLS,
+            "--permission-mode", "acceptEdits",
+            prompt,
+        ],
         cwd=_CWD,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -146,16 +166,27 @@ def _ask_claude_stream(
             try:
                 obj = json.loads(line)
                 kind = obj.get("type", "")
+
                 if kind == "text":
+                    # Simple text event (non-partial mode)
                     accumulated += obj.get("text", "")
-                    now = time.monotonic()
-                    if now - last_update >= _STREAM_INTERVAL:
-                        on_update(accumulated)
-                        last_update = now
+                elif kind == "stream_event":
+                    # --include-partial-messages token-level events
+                    inner = obj.get("event", {})
+                    if inner.get("type") == "content_block_delta":
+                        delta = inner.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            accumulated += delta.get("text", "")
                 elif kind == "result" and obj.get("subtype") == "success":
                     final_result = obj.get("result", accumulated).strip()
+                    break  # done — don't read further
+
+                now = time.monotonic()
+                if accumulated and now - last_update >= _STREAM_INTERVAL:
+                    on_update(accumulated)
+                    last_update = now
+
             except json.JSONDecodeError:
-                # Fallback: treat as plain text line
                 accumulated += line + "\n"
     finally:
         try:
