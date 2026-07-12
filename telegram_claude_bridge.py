@@ -121,7 +121,7 @@ def _send_chunks(chat_id: int, text: str) -> None:
 
 # ── Claude invocation ─────────────────────────────────────────────────────────
 
-_CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write"
+_CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
 _CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
 
 
