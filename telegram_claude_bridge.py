@@ -186,6 +186,7 @@ def _ask_claude_stream(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=_subprocess_env(),
     )
 
     accumulated = ""
