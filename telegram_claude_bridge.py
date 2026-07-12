@@ -136,6 +136,9 @@ def _ask_claude_plain(prompt: str) -> str:
         return f"Claude exited with code {result.returncode} (no output)."
     try:
         data = json.loads(raw)
+        sid = data.get("session_id")
+        if sid:
+            _SESSION_FILE.write_text(sid)
         return (data.get("result") or data.get("text") or raw or "(no output)").strip()
     except json.JSONDecodeError:
         return raw or "(Claude returned no output.)"
@@ -156,6 +159,7 @@ def _ask_claude_stream(
     proc = subprocess.Popen(
         [
             "claude", "--print",
+            *_resume_args(),
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
@@ -194,6 +198,9 @@ def _ask_claude_stream(
                             accumulated += delta.get("text", "")
                 elif kind == "result" and obj.get("subtype") == "success":
                     final_result = obj.get("result", accumulated).strip()
+                    sid = obj.get("session_id")
+                    if sid:
+                        _SESSION_FILE.write_text(sid)
                     break  # done — don't read further
 
                 now = time.monotonic()
