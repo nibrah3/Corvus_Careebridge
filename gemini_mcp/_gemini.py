@@ -167,7 +167,12 @@ def upload_file(file_path: str, mime_type: str | None = None) -> dict:
 
         mime = mime_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         t0 = time.monotonic()
-        uploaded = client.files.upload(file=str(path), config={"mime_type": mime})
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(client.files.upload, file=str(path), config={"mime_type": mime})
+            try:
+                uploaded = fut.result(timeout=_UPLOAD_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                return {"error": f"Gemini upload timed out after {_UPLOAD_TIMEOUT}s"}
 
         deadline = time.monotonic() + 120
         while uploaded.state.name != "ACTIVE":
