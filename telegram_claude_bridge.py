@@ -98,6 +98,9 @@ def _send_chunks(chat_id: int, text: str) -> None:
 
 _CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write"
 
+# Full path to claude CLI — npm-installed scripts aren't on Python subprocess PATH
+_CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
+
 # Session file that pins the conversation ID for cross-message continuity.
 # All Telegram DMs continue the same Claude session rather than starting fresh.
 _SESSION_FILE = ROOT / ".telegram_session_id"
@@ -116,7 +119,7 @@ def _ask_claude_plain(prompt: str) -> str:
     """Blocking call: `claude --print --continue --output-format json <prompt>` → response text."""
     result = subprocess.run(
         [
-            "claude", "--print",
+            _CLAUDE_BIN, "--print",
             *_resume_args(),
             "--output-format", "json",
             "--allowedTools", _CLAUDE_TOOLS,
@@ -158,7 +161,7 @@ def _ask_claude_stream(
     """
     proc = subprocess.Popen(
         [
-            "claude", "--print",
+            _CLAUDE_BIN, "--print",
             *_resume_args(),
             "--output-format", "stream-json",
             "--verbose",
