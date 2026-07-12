@@ -115,6 +115,17 @@ def _resume_args() -> list[str]:
     return ["--continue"]
 
 
+def _subprocess_env() -> dict:
+    """
+    Build subprocess env that forces claude CLI into subscription mode.
+    Remove ANTHROPIC_API_KEY entirely — if it's set (even empty), claude
+    tries API-credit mode and fails. Subscription (OAuth) requires it absent.
+    """
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    return env
+
+
 def _ask_claude_plain(prompt: str) -> str:
     """Blocking call: `claude --print --continue --output-format json <prompt>` → response text."""
     result = subprocess.run(
@@ -130,6 +141,7 @@ def _ask_claude_plain(prompt: str) -> str:
         capture_output=True,
         text=True,
         timeout=_TIMEOUT,
+        env=_subprocess_env(),
     )
     raw = (result.stdout or "").strip()
     if result.returncode != 0 and not raw:
