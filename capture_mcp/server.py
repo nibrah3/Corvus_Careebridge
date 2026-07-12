@@ -7,8 +7,10 @@ Tools:
   start_video       — begin DXcam continuous capture (for Gemini video pipeline)
   stop_video        — stop capture, save MP4, return file path
 
-Backend priority: MSS (single-shot) + DXcam (video/continuous)
-GDI as fallback if MSS fails.
+BACKEND: DXcam (DXGI IDXGIOutputDuplication) exclusively for ALL capture.
+No MSS, no GDI, no BitBlt fallback. Hard-fails if dxcam is unavailable.
+DXGI reads directly from the GPU compositor swap chain — invisible to browsers
+and websites. No Win32 GDI calls that can be hooked or detected.
 """
 from __future__ import annotations
 
@@ -17,9 +19,7 @@ from typing import Optional
 
 from _minmcp import MinMCP
 
-from ._backend_mss import capture as _mss_cap, available as _mss_ok
-from ._backend_gdi import capture as _gdi_cap, available as _gdi_ok
-from ._backend_dxcam import available as _dxcam_ok
+from ._backend_dxcam import capture as _dxcam_cap, available as _dxcam_ok
 
 mcp = MinMCP("capture")
 
@@ -44,19 +44,20 @@ def _screenshot_bytes(
 ) -> tuple[bytes, str]:
     """
     Returns (image_bytes, mime_type).
-    Tries MSS first, falls back to GDI.
+    Uses DXcam (DXGI) exclusively. Hard-fails if unavailable — no GDI/MSS fallback.
     fmt: 'jpeg' (smaller, faster) or 'png' (lossless).
     """
     from PIL import Image
 
-    if _mss_ok():
-        img = _mss_cap(x, y, w, h)
-        pil = Image.open(io.BytesIO(img))
-    elif _gdi_ok():
-        img = _gdi_cap(x, y, w, h)
-        pil = Image.open(io.BytesIO(img))
-    else:
-        raise RuntimeError("No screenshot backend available")
+    if not _dxcam_ok():
+        raise RuntimeError(
+            "DXcam (DXGI) is unavailable. "
+            "GDI/MSS fallback is intentionally disabled to prevent browser detection. "
+            "Fix: pip install dxcam"
+        )
+
+    img = _dxcam_cap(x, y, w, h)
+    pil = Image.open(io.BytesIO(img))
 
     # Crop centre 60% width (removes taskbar/sidebars Claude ignores)
     # Only apply when full-screen (no region specified)
