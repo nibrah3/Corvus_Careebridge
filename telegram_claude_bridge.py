@@ -60,6 +60,25 @@ _ADMINS: list[int] = []
 
 _STREAM_MODE = "--stream" in sys.argv
 
+# Screen-reading ground rules injected into every prompt so the subprocess
+# Claude never reaches for keyboard shortcuts or CDP screenshots.
+_SYSTEM_PROMPT = """\
+[System rules — follow strictly]
+You are running as a remote control subprocess for CareerBridge via Telegram.
+
+SCREEN READING RULE (absolute, no exceptions):
+- If the user asks what is on the screen, to read the screen, or to describe
+  what they see — use ONLY mcp__capture__screenshot (DXGI GPU compositor read).
+- NEVER take a screenshot via: keyboard shortcuts (PrintScreen / Win+PrtScr),
+  Win32 BitBlt/GDI/GetDC, PowerShell cmdlets, or CDP Page.captureScreenshot.
+- After capturing, pass the returned file path to mcp__gemini__analyse_image
+  to describe what is visible.
+- If mcp__capture__screenshot is unavailable, say so — do NOT fall back to any
+  other screenshot method.
+
+[End system rules]
+"""
+
 # ── In-process conversation history ──────────────────────────────────────────
 # Keeps last N turns so each claude call has context without --continue.
 # Keys are chat_id; values are deque of (user_msg, assistant_reply) tuples.
@@ -69,20 +88,23 @@ _history_lock = threading.Lock()
 
 
 def _build_prompt(chat_id: int, user_text: str) -> str:
-    """Prepend recent conversation history so Claude has context."""
+    """Prepend system rules + recent conversation history so Claude has context."""
     with _history_lock:
         turns = list(_history.get(chat_id, []))
 
-    if not turns:
-        return user_text
+    parts = [_SYSTEM_PROMPT]
 
-    lines = ["[Previous conversation]\n"]
-    for u, a in turns:
-        lines.append(f"User: {u}")
-        lines.append(f"Assistant: {a}\n")
-    lines.append("[Current message]")
-    lines.append(f"User: {user_text}")
-    return "\n".join(lines)
+    if turns:
+        parts.append("[Previous conversation]\n")
+        for u, a in turns:
+            parts.append(f"User: {u}")
+            parts.append(f"Assistant: {a}\n")
+        parts.append("[Current message]")
+        parts.append(f"User: {user_text}")
+    else:
+        parts.append(user_text)
+
+    return "\n".join(parts)
 
 
 def _record_turn(chat_id: int, user_text: str, reply: str) -> None:
