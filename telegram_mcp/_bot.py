@@ -76,9 +76,10 @@ def send_document(chat_id: int | str, doc_bytes: bytes, filename: str, caption: 
 
 
 def edit_message(chat_id: int | str, message_id: int, text: str,
-                 parse_mode: str = "HTML", reply_markup: dict | None = None) -> dict:
-    payload: dict = {"chat_id": chat_id, "message_id": message_id,
-                     "text": text, "parse_mode": parse_mode}
+                 parse_mode: str | None = "HTML", reply_markup: dict | None = None) -> dict:
+    payload: dict = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if parse_mode is not None:
+        payload["parse_mode"] = parse_mode
     if reply_markup:
         payload["reply_markup"] = reply_markup
     return _post("editMessageText", **payload)
