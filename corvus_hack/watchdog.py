@@ -29,13 +29,20 @@ def _load_env() -> None:
 _load_env()
 sys.path.insert(0, str(ROOT))
 
-BOT_TOKEN     = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-PYTHONW       = r"C:\Python314\pythonw.exe"
-MASTER_PORT   = 9200
+BOT_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+PYTHONW        = r"C:\Python314\pythonw.exe"
+MASTER_PORT    = 9200
+CAPTURE_PORT   = 8703
 CHECK_INTERVAL = 60  # seconds
 
-MASTER_SCRIPT = str(ROOT / "corvus_hack" / "master_dispatcher.py")
+# Mike-only mode: if CORVUS_ACCOUNT is set, capture_server + worker also run here.
+CORVUS_ACCOUNT = os.environ.get("CORVUS_ACCOUNT", "")
+MIKE_MODE      = bool(CORVUS_ACCOUNT)
+
+MASTER_SCRIPT  = str(ROOT / "corvus_hack" / "master_dispatcher.py")
 BRIDGE_SCRIPT  = str(ROOT / "telegram_claude_bridge.py")
+CAPTURE_SCRIPT = str(ROOT / "corvus_hack" / "capture_server.py")
+WORKER_SCRIPT  = str(ROOT / "corvus_hack" / "worker.py")
 
 
 def _admin_chat_ids() -> list[int]:
@@ -71,9 +78,10 @@ def _process_running(script_fragment: str) -> bool:
         return True  # assume running on check failure
 
 
-def _start_bg(script: str) -> None:
+def _start_bg(script: str, args: list | None = None) -> None:
+    cmd = [PYTHONW, script] + (args or [])
     subprocess.Popen(
-        [PYTHONW, script],
+        cmd,
         cwd=str(ROOT),
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
     )
