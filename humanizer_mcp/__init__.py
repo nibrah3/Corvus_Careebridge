@@ -1,1 +1,0 @@
-# humanizer_mcp
