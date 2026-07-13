@@ -19,6 +19,20 @@ import time
 
 import requests
 
+_ROOT = Path(__file__).parent.parent
+
+
+def _load_env() -> None:
+    env = _ROOT / ".env"
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env()
+
 CAPTURE_PORT = int(os.environ.get("CORVUS_CAPTURE_PORT", "8703"))
 CAPTURE  = f"http://localhost:{CAPTURE_PORT}"
 GEMINI   = "http://localhost:8705"
