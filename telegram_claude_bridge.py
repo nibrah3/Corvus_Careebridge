@@ -376,9 +376,31 @@ def _handle(msg: dict) -> None:
 
     lower = text.lower()
 
+    # ── Admin shortcut: start <chat_id> [platform] ───────────────────────────
+    # Quick form: start 1234567890  or  start 1234567890 imocha
+    if lower.startswith("start "):
+        parts = text.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            client_id = int(parts[1])
+            platform = parts[2] if len(parts) >= 3 else "assessment"
+            result = _master_post(
+                "/admin/start_session",
+                {"client_chat_id": client_id, "platform": platform},
+            )
+            if result and "session_id" in result:
+                send_message(
+                    chat_id,
+                    f"Session started for {client_id} on {platform}.\nID: {result['session_id']}",
+                    parse_mode=None,
+                )
+            elif result and "error" in result:
+                send_message(chat_id, f"Error: {result['error']}", parse_mode=None)
+            else:
+                send_message(chat_id, "Master dispatcher unreachable.", parse_mode=None)
+            return
+
     # ── Admin shortcut: start session ─────────────────────────────────────────
-    # Usage: start session <client_chat_id> <platform>
-    #   e.g. start session 123456789 imocha
+    # Long form: start session <client_chat_id> <platform>
     if lower.startswith("start session "):
         parts = text.split()
         if len(parts) >= 3:
@@ -438,17 +460,18 @@ def _handle(msg: dict) -> None:
     if lower in ("/help", "help"):
         send_message(
             chat_id,
-            "Telegram → Claude Code Bridge\n\n"
-            f"Working directory: {_CWD}\n\n"
-            "Commands:\n"
-            "/ping — check bridge is alive\n"
-            "/clearhistory — forget conversation, start fresh\n"
-            "/help — this message\n\n"
-            "Tips:\n"
-            "• Claude remembers the last few messages\n"
-            "• Long responses are split into chunks\n"
-            f"• Timeout: {_TIMEOUT}s per call\n"
-            f"• Mode: {'streaming' if _STREAM_MODE else 'plain'}",
+            "Corvus Admin Commands\n\n"
+            "Session:\n"
+            "  start <chat_id>            — start client session\n"
+            "  start <chat_id> <platform> — start on named platform\n"
+            "  end session <session_id>   — end a session\n"
+            "  pool / sessions            — show active sessions\n\n"
+            "Bridge:\n"
+            "  /ping          — health check\n"
+            "  /clearhistory  — reset conversation\n"
+            "  /help          — this message\n\n"
+            f"Mode: {'streaming' if _STREAM_MODE else 'plain'}  |  Timeout: {_TIMEOUT}s\n"
+            f"CWD: {_CWD}",
             parse_mode=None,
         )
         return
