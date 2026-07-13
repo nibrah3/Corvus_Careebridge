@@ -104,8 +104,8 @@ set "CORVUS_CAPTURE_PORT=8703"
 set "CORVUS_ACCOUNT=%USERNAME%"
 set "PATH=C:\Python314;%PATH%"
 
-REM Start capture_mcp on port 8703 (DXGI — must run in this session)
-start "corvus_capture" /B C:\Python314\pythonw.exe -m capture_mcp.server --http 8703 --workdir "E:\Corvus_Careebridge\capture_mcp"
+REM Start capture_server (DXGI REST API — session-local, must run here not on Mike's session)
+start "corvus_capture" /B C:\Python314\pythonw.exe E:\Corvus_Careebridge\corvus_hack\capture_server.py 8703
 
 REM Wait 5s for capture server to bind
 timeout /t 5 /nobreak >NUL
