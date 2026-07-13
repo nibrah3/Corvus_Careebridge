@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 BOT_TOKEN     = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 PYTHONW       = r"C:\Python314\pythonw.exe"
 MASTER_PORT   = 9200
-CHECK_INTERVAL = 120  # seconds
+CHECK_INTERVAL = 60  # seconds
 
 MASTER_SCRIPT = str(ROOT / "corvus_hack" / "master_dispatcher.py")
 BRIDGE_SCRIPT  = str(ROOT / "telegram_claude_bridge.py")
