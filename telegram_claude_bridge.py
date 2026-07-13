@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from collections import deque
 
+import requests as _requests
+
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).parent
@@ -309,15 +311,81 @@ def _handle_stream(chat_id: int, user_text: str) -> None:
     _send_chunks(chat_id, final)
 
 
+_MASTER = "http://localhost:9200"
+
+
+def _master_post(path: str, body: dict) -> dict | None:
+    try:
+        r = _requests.post(f"{_MASTER}{path}", json=body, timeout=10)
+        return r.json()
+    except Exception as e:
+        log.warning("master_dispatcher %s failed: %s", path, e)
+        return None
+
+
 def _handle(msg: dict) -> None:
     chat_id = msg.get("chat", {}).get("id", 0)
     text = (msg.get("text") or "").strip()
-    if not text or chat_id not in _ADMINS:
+    if not text:
+        return
+
+    # ── Non-admin (client) messages → route to master_dispatcher ──────────────
+    if chat_id not in _ADMINS:
+        log.info("client chat=%s  %r", chat_id, text[:60])
+        _master_post("/client/message", {"chat_id": chat_id, "text": text})
         return
 
     log.info("chat=%s  %r", chat_id, text[:80])
 
     lower = text.lower()
+
+    # ── Admin shortcut: start session ─────────────────────────────────────────
+    # Usage: start session <client_chat_id> <platform>
+    #   e.g. start session 123456789 imocha
+    if lower.startswith("start session "):
+        parts = text.split()
+        if len(parts) >= 3:
+            try:
+                client_id = int(parts[2])
+                platform  = parts[3] if len(parts) >= 4 else "assessment"
+                result = _master_post(
+                    "/admin/start_session",
+                    {"client_chat_id": client_id, "platform": platform},
+                )
+                if result and "session_id" in result:
+                    send_message(
+                        chat_id,
+                        f"Session started.\nID: {result['session_id']}\nAccount: {result['account']}\nPlatform: {platform}",
+                        parse_mode=None,
+                    )
+                elif result and "error" in result:
+                    send_message(chat_id, f"Error: {result['error']}", parse_mode=None)
+                else:
+                    send_message(chat_id, "Master dispatcher unreachable.", parse_mode=None)
+            except (ValueError, IndexError) as e:
+                send_message(chat_id, f"Usage: start session <chat_id> <platform>\nError: {e}", parse_mode=None)
+        return
+
+    # ── Admin shortcut: end session ───────────────────────────────────────────
+    # Usage: end session <session_id>
+    if lower.startswith("end session "):
+        parts = text.split()
+        if len(parts) >= 3:
+            sid = parts[2]
+            result = _master_post("/admin/end_session", {"session_id": sid})
+            send_message(chat_id, f"Session {sid} ended." if result else "Master unreachable.", parse_mode=None)
+        return
+
+    # ── Admin shortcut: pool / sessions status ────────────────────────────────
+    if lower in ("pool", "/pool", "sessions", "/sessions"):
+        try:
+            path = "/admin/pool" if "pool" in lower else "/admin/sessions"
+            r = _requests.get(f"{_MASTER}{path}", timeout=8)
+            data = r.json()
+            send_message(chat_id, json.dumps(data, indent=2)[:3000], parse_mode=None)
+        except Exception as e:
+            send_message(chat_id, f"Master unreachable: {e}", parse_mode=None)
+        return
 
     if lower in ("/ping", "ping"):
         mode = "streaming" if _STREAM_MODE else "plain"
