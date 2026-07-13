@@ -108,13 +108,25 @@ def _check() -> None:
     if not _port_open(MASTER_PORT):
         print("[watchdog] master_dispatcher DOWN — restarting")
         _start_bg(MASTER_SCRIPT)
-        time.sleep(5)  # wait for port to bind before alerting
+        time.sleep(5)
         issues.append("master_dispatcher was down — restarted automatically")
 
     if not _process_running("telegram_claude_bridge"):
         print("[watchdog] telegram_claude_bridge DOWN — restarting")
         _start_bg(BRIDGE_SCRIPT)
         issues.append("telegram_claude_bridge was down — restarted automatically")
+
+    if MIKE_MODE:
+        if not _port_open(CAPTURE_PORT):
+            print("[watchdog] capture_server DOWN — restarting")
+            _start_bg(CAPTURE_SCRIPT, args=["8703"])
+            time.sleep(3)
+            issues.append("capture_server was down — restarted automatically")
+
+        if not _process_running("worker.py"):
+            print("[watchdog] worker DOWN — restarting")
+            _start_bg(WORKER_SCRIPT)
+            issues.append("worker was down — restarted automatically")
 
     if issues:
         _alert("\n".join(issues))
@@ -124,7 +136,8 @@ def _check() -> None:
 
 
 def main() -> None:
-    print(f"[watchdog] Starting — health checks every {CHECK_INTERVAL}s")
+    mode = f"Mike-only (CORVUS_ACCOUNT={CORVUS_ACCOUNT})" if MIKE_MODE else "multi-account"
+    print(f"[watchdog] Starting — {mode} mode, health checks every {CHECK_INTERVAL}s")
     while True:
         try:
             _check()
