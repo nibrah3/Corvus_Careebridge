@@ -11,7 +11,7 @@
 #   - Set UltraViewer unattended password in-app
 
 param(
-    [string]$Password = "Corvus2026!"
+    [string]$Password = "PRODUCT13"
 )
 
 $ErrorActionPreference = "Stop"
