@@ -168,6 +168,20 @@ def stop_capture():
     return jsonify({"status": "stopped"})
 
 
+def _frame_cleanup() -> None:
+    """Safety net: delete frames older than 10 minutes that worker never claimed."""
+    while True:
+        time.sleep(300)
+        cutoff = time.time() - 600
+        for f in FRAMES_DIR.glob("frame_*.png"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except Exception:
+                pass
+
+threading.Thread(target=_frame_cleanup, daemon=True).start()
+
 if __name__ == "__main__":
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8703

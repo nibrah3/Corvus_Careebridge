@@ -62,6 +62,9 @@ _lock = threading.Lock()
 _pending_accounts: dict[str, str] = {}
 _pending_lock = threading.Lock()
 
+# Limit concurrent Claude subprocesses — each can take 30–90s, events arrive every 2s
+_claude_sem = threading.Semaphore(3)
+
 # ── Telegram helper ───────────────────────────────────────────────────────────
 
 def _telegram_send(chat_id: int, text: str) -> None:
@@ -218,8 +221,9 @@ def handle_event():
     session["last_screen"] = screen[:500]
 
     def _respond():
-        prompt   = _guidance_prompt(session, screen, event_type)
-        guidance = _call_claude(prompt)
+        with _claude_sem:
+            prompt   = _guidance_prompt(session, screen, event_type)
+            guidance = _call_claude(prompt)
         if guidance.strip().upper() == "OK":
             return
         _telegram_send(session["chat_id"], guidance)
@@ -271,8 +275,9 @@ def handle_video():
             desc = r2.json().get("text", "")
             if not desc:
                 return
-            prompt   = f"Assessment video clip:\n{desc}\n\nWhat should I tell the user to do now? Be direct."
-            guidance = _call_claude(prompt)
+            with _claude_sem:
+                prompt   = f"Assessment video clip:\n{desc}\n\nWhat should I tell the user to do now? Be direct."
+                guidance = _call_claude(prompt)
             _telegram_send(session["chat_id"], f"Video: {guidance}")
         except Exception as e:
             log.error("Video analysis failed: %s", e)
@@ -309,8 +314,9 @@ def client_message():
         return jsonify({"status": "starting"})
 
     def _answer():
-        prompt   = _client_question_prompt(session, text)
-        guidance = _call_claude(prompt)
+        with _claude_sem:
+            prompt   = _client_question_prompt(session, text)
+            guidance = _call_claude(prompt)
         _telegram_send(chat_id, guidance)
 
     threading.Thread(target=_answer, daemon=True).start()
