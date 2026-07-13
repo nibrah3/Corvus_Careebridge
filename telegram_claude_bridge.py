@@ -335,54 +335,40 @@ def _handle(msg: dict) -> None:
         log.info("client chat=%s  %r", chat_id, text[:60])
         lower = text.lower()
 
-        # Self-service: "start [platform]" starts a session immediately
-        if lower == "start" or lower.startswith("start "):
-            parts = text.split()
-            platform = parts[1] if len(parts) >= 2 else "assessment"
-            result = _master_post(
-                "/admin/start_session",
-                {"client_chat_id": chat_id, "username": username, "platform": platform},
-            )
-            if result and "session_id" in result:
-                send_message(
-                    chat_id,
-                    f"Session ready on {platform}.\n\nNavigate to your assessment and I'll guide you as screens change.\nText me if you have a question.\n\nSend 'stop' when you're done.",
-                    parse_mode=None,
-                )
-            elif result and "error" in result:
-                send_message(chat_id, f"Sorry, couldn't start: {result['error']}", parse_mode=None)
-            else:
-                send_message(chat_id, "System unavailable right now. Try again in a minute.", parse_mode=None)
-            return
-
-        # Self-service: "stop" ends their session
+        # Client signalling they're done
         if lower in ("stop", "done", "end", "exit"):
             try:
-                from corvus_hack.db import get_client_session, release_account
+                from corvus_hack.db import get_client_session
                 sess = get_client_session(chat_id)
                 if sess:
                     _master_post("/admin/end_session", {"session_id": sess["session_id"]})
-                    send_message(chat_id, "Session ended. Thanks for using Corvus!", parse_mode=None)
+                    send_message(chat_id, "Session ended. Thanks!", parse_mode=None)
                 else:
                     send_message(chat_id, "No active session.", parse_mode=None)
             except Exception as e:
                 log.error("Client stop failed: %s", e)
-                send_message(chat_id, "Could not end session. Contact support.", parse_mode=None)
             return
 
-        # Help / first contact
-        if lower in ("/start", "/help", "help", "hi", "hello"):
-            send_message(
-                chat_id,
-                "Welcome to Corvus!\n\nI guide you through online assessments in real time.\n\n"
-                "To begin:\n  Send: start [platform]\n  Example: start imocha\n  Example: start criteria\n  Example: start\n\n"
-                "During your session just navigate normally — I'll send guidance as screens change.\n"
-                "You can also ask me questions at any time.\n\nSend 'stop' when finished.",
-                parse_mode=None,
-            )
+        # First contact — ping admin with chat_id so Mike can start the session manually
+        with _history_lock:
+            is_new = chat_id not in _history
+        if is_new:
+            user_str = f"@{username}" if username else str(chat_id)
+            for admin_id in _ADMINS:
+                try:
+                    send_message(
+                        admin_id,
+                        f"New client: {user_str}  (chat_id: {chat_id})\nSays: {text[:200]}\n\nTo start their session: start {chat_id}",
+                        parse_mode=None,
+                    )
+                except Exception:
+                    pass
+            send_message(chat_id, "Connected! Your guide will start your session when ready.", parse_mode=None)
+            with _history_lock:
+                _history[chat_id] = deque(maxlen=_HISTORY_TURNS)
             return
 
-        # In-session question → route to master
+        # In-session question → route to master for Claude to answer
         _master_post("/client/message", {"chat_id": chat_id, "text": text})
         return
 
