@@ -183,6 +183,7 @@ def _ask_claude_plain(prompt: str) -> str:
         encoding="utf-8",
         timeout=_TIMEOUT,
         env=_subprocess_env(),
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     raw = (result.stdout or "").strip()
     if result.returncode != 0 and not raw:
