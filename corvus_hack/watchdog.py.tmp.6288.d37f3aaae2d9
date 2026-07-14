@@ -85,9 +85,13 @@ def _process_running(script_fragment: str) -> bool:
 
 def _start_bg(script: str, args: list | None = None) -> None:
     cmd = [PYTHONW, script] + (args or [])
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
     subprocess.Popen(
         cmd,
         cwd=str(ROOT),
+        startupinfo=si,
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
     )
 
