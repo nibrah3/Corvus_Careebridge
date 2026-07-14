@@ -54,7 +54,7 @@ from telegram_mcp._bot import admin_chat_ids, bus, send_message, edit_message
 # ── Config ────────────────────────────────────────────────────────────────────
 
 _CWD = str(ROOT)
-_TIMEOUT = 300          # max seconds per claude call (5 min for complex tasks)
+_TIMEOUT = 90           # max seconds per claude call
 _TG_MAX = 3800          # leave room below Telegram's 4096-char limit
 _STREAM_INTERVAL = 1.5  # seconds between live edit_message updates
 _HISTORY_TURNS = 6      # number of recent Q&A pairs to include as context
@@ -153,6 +153,7 @@ def _send_chunks(chat_id: int, text: str) -> None:
 
 _CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
 _CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
+_MCP_CONFIG = str(ROOT / "bridge_mcp.json")
 
 
 def _subprocess_env() -> dict:
@@ -169,9 +170,12 @@ def _ask_claude_plain(prompt: str) -> str:
             "--output-format", "json",
             "--allowedTools", _CLAUDE_TOOLS,
             "--permission-mode", "acceptEdits",
+            "--mcp-config", _MCP_CONFIG,
+            "--strict-mcp-config",
             prompt,
         ],
         cwd=_CWD,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         encoding="utf-8",

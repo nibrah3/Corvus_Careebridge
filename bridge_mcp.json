@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "capture": {
+      "type": "http",
+      "url": "http://localhost:8702/mcp"
+    },
+    "gemini": {
+      "type": "http",
+      "url": "http://localhost:8705/mcp"
+    }
+  }
+}
