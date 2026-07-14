@@ -894,7 +894,7 @@ def _handle(msg: dict) -> None:
         return
 
     # ── Non-admin (client) messages ────────────────────────────────────────────
-    if chat_id not in _ADMINS:
+    if chat_id not in _ADMINS or chat_id in _test_client_ids:
         log.info("client chat=%s  %r", chat_id, text[:60])
 
         with _sessions_lock:
@@ -1090,7 +1090,7 @@ def _handle_callback(cq: dict) -> None:
 
     if not chat_id or not data:
         return
-    if chat_id in _ADMINS:
+    if chat_id in _ADMINS and chat_id not in _test_client_ids:
         return  # admin callbacks are handled elsewhere (MCP tools)
 
     log.info("client callback chat=%s data=%r", chat_id, data)
