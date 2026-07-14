@@ -94,6 +94,11 @@ SCREEN READING RULE (absolute, no exceptions):
 _history: dict[int, deque[tuple[str, str]]] = {}
 _history_lock = threading.Lock()
 
+# Serialize all Claude subprocess calls: one at a time prevents resource
+# contention (6 simultaneous Node.js processes → 4× slowdown on Windows).
+# Also ensures history is built/recorded in message order.
+_claude_lock = threading.Lock()
+
 
 def _build_prompt(chat_id: int, user_text: str) -> str:
     """Prepend system rules + recent conversation history so Claude has context."""
@@ -266,17 +271,18 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]") -> str:
 
 def _handle_plain(chat_id: int, user_text: str) -> None:
     send_message(chat_id, "Thinking...", parse_mode=None)
-    prompt = _build_prompt(chat_id, user_text)
-    try:
-        answer = _ask_claude_plain(prompt)
-    except subprocess.TimeoutExpired:
-        send_message(chat_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
-        return
-    except Exception as exc:
-        log.exception("Claude call failed")
-        send_message(chat_id, f"Error: {exc}", parse_mode=None)
-        return
-    _record_turn(chat_id, user_text, answer)
+    with _claude_lock:
+        prompt = _build_prompt(chat_id, user_text)
+        try:
+            answer = _ask_claude_plain(prompt)
+        except subprocess.TimeoutExpired:
+            send_message(chat_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
+            return
+        except Exception as exc:
+            log.exception("Claude call failed")
+            send_message(chat_id, f"Error: {exc}", parse_mode=None)
+            return
+        _record_turn(chat_id, user_text, answer)
     _send_chunks(chat_id, answer)
 
 
@@ -298,20 +304,20 @@ def _handle_stream(chat_id: int, user_text: str) -> None:
         except Exception:
             pass
 
-    prompt = _build_prompt(chat_id, user_text)
-    try:
-        final = _ask_claude_stream(prompt, _update)
-    except subprocess.TimeoutExpired:
-        if msg_id:
-            edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
-        return
-    except Exception as exc:
-        log.exception("Claude stream failed")
-        if msg_id:
-            edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
-        return
-
-    _record_turn(chat_id, user_text, final)
+    with _claude_lock:
+        prompt = _build_prompt(chat_id, user_text)
+        try:
+            final = _ask_claude_stream(prompt, _update)
+        except subprocess.TimeoutExpired:
+            if msg_id:
+                edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
+            return
+        except Exception as exc:
+            log.exception("Claude stream failed")
+            if msg_id:
+                edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
+            return
+        _record_turn(chat_id, user_text, final)
 
     if msg_id and len(final) <= _TG_MAX:
         try:
