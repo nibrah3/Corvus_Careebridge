@@ -473,32 +473,58 @@ def _handle_stream(chat_id: int, user_text: str) -> None:
         msg_id = resp["result"]["message_id"]
 
     last_sent = [""]
+    last_sent_lock = threading.Lock()
+    stream_started = threading.Event()  # set when first real token arrives
+
+    # Background ticker: updates the status message every 8s during the
+    # Node.js cold-start gap so the user sees the system actively working.
+    # Stops itself the moment real response tokens begin streaming.
+    def _status_ticker() -> None:
+        if msg_id is None:
+            return
+        pool = _PROGRESS_SCREEN if screen else _PROGRESS_CHAT
+        for phrase in pool:
+            if stream_started.wait(timeout=8):
+                return  # tokens arrived — hand off to _update
+            try:
+                edit_message(chat_id, msg_id, phrase, parse_mode=None)
+                with last_sent_lock:
+                    last_sent[0] = phrase
+            except Exception:
+                pass
+
+    threading.Thread(target=_status_ticker, daemon=True).start()
 
     def _update(accumulated: str) -> None:
-        if msg_id is None or accumulated == last_sent[0]:
-            return
-        preview = accumulated[-_TG_MAX:] if len(accumulated) > _TG_MAX else accumulated
-        try:
-            edit_message(chat_id, msg_id, preview, parse_mode=None)
-            last_sent[0] = accumulated
-        except Exception:
-            pass
+        stream_started.set()  # cancel the ticker
+        with last_sent_lock:
+            if msg_id is None or accumulated == last_sent[0]:
+                return
+            preview = accumulated[-_TG_MAX:] if len(accumulated) > _TG_MAX else accumulated
+            try:
+                edit_message(chat_id, msg_id, preview, parse_mode=None)
+                last_sent[0] = accumulated
+            except Exception:
+                pass
 
     with _claude_lock:
         prompt = _build_prompt(chat_id, user_text)
         try:
             final = _ask_claude_stream(prompt, _update, screen=screen)
         except subprocess.TimeoutExpired:
+            stream_started.set()
             if msg_id:
                 edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
             return
         except Exception as exc:
+            stream_started.set()
             log.exception("Claude stream failed")
             if msg_id:
                 edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
             return
         _record_turn(chat_id, user_text, final)
 
+    stream_started.set()
     if msg_id and len(final) <= _TG_MAX:
         try:
             edit_message(chat_id, msg_id, final, parse_mode=None)
