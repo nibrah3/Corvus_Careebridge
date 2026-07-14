@@ -63,7 +63,7 @@ from telegram_mcp._bot import admin_chat_ids, bus, send_message, edit_message
 # ── Config ────────────────────────────────────────────────────────────────────
 
 _CWD = r"C:\tmp"  # neutral dir — no CLAUDE.md here to pollute Claude's context
-_TIMEOUT = 90           # max seconds per claude call
+_TIMEOUT = 120          # max seconds per claude call
 _TG_MAX = 3800          # leave room below Telegram's 4096-char limit
 _STREAM_INTERVAL = 1.5  # seconds between live edit_message updates
 _HISTORY_TURNS = 6      # recent Q&A pairs included as context
@@ -197,7 +197,7 @@ def _build_prompt(chat_id: int, user_text: str) -> str:
         parts.append("")
 
     if turns:
-        parts.append("[Previous conversation]\n")
+        parts.append("[Previous conversation — actual session dialogue; use to answer any back-references]\n")
         for u, a in turns:
             parts.append(f"User: {u}")
             parts.append(f"Assistant: {a}\n")
@@ -338,6 +338,8 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
             "--mcp-config", _MCP_CONFIG,
             "--strict-mcp-config",
         ]
+    else:
+        cmd += ["--allowedTools", "none"]  # no tools — answer from prompt only
     cmd.append(prompt)
 
     result = subprocess.run(
@@ -382,6 +384,8 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
             "--mcp-config", _MCP_CONFIG,
             "--strict-mcp-config",
         ]
+    else:
+        cmd += ["--allowedTools", "none"]  # no tools — answer from prompt only
     cmd.append(prompt)
 
     proc = subprocess.Popen(
