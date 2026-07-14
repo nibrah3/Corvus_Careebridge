@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue as _queue
 import sqlite3
 import subprocess
 import sys
@@ -426,27 +427,59 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
     last_update = 0.0
     final_result = ""
     _did_timeout = threading.Event()
+    stdout_q: "_queue.Queue[str | None]" = _queue.Queue()
+
+    def _reader() -> None:
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                stdout_q.put(line)
+        except Exception:
+            pass
+        stdout_q.put(None)  # EOF sentinel
 
     def _kill_on_timeout() -> None:
         _did_timeout.set()
-        # Kill the entire process tree — proc.kill() only kills claude.cmd,
-        # leaving the Node.js child running. taskkill /F /T kills all children.
         try:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                capture_output=True, timeout=5,
-            )
+            import psutil
+            parent = psutil.Process(proc.pid)
+            for child in parent.children(recursive=True):
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            parent.kill()
         except Exception:
             try:
-                proc.kill()
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True, timeout=5,
+                )
             except Exception:
-                pass
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        stdout_q.put(None)  # unblock main loop if kill succeeded
 
+    threading.Thread(target=_reader, daemon=True).start()
     kill_timer = threading.Timer(_TIMEOUT, _kill_on_timeout)
     kill_timer.start()
 
+    # Hard deadline: _TIMEOUT + 10s grace so this function ALWAYS returns
+    # even if the process tree kill fails and node.exe stays alive.
+    deadline = time.monotonic() + _TIMEOUT + 10
+
     try:
-        for raw_line in proc.stdout:  # type: ignore[union-attr]
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                raw_line = stdout_q.get(timeout=min(remaining, 1.0))
+            except _queue.Empty:
+                continue
+            if raw_line is None:
+                break  # EOF or kill sentinel
             line = raw_line.strip()
             if not line:
                 continue
