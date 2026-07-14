@@ -275,6 +275,12 @@ def _subprocess_env() -> dict:
     env = os.environ.copy()
     env["ANTHROPIC_API_KEY"] = ""       # force OAuth/subscription mode
     env["CLAUDE_CODE_SIMPLE"] = "1"     # disable CLAUDE.md auto-discovery
+    # Neutralise Windows identity vars — Claude Code injects these as system
+    # context, causing it to reply "your Windows username is Mike" instead of
+    # reading the actual user's name from <conversation_history>.
+    env["USERNAME"] = "corvus_client"
+    env["USERDOMAIN"] = ""
+    env["COMPUTERNAME"] = "corvus-host"
     return env
 
 
