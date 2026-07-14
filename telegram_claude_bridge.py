@@ -54,19 +54,28 @@ def _load_env() -> None:
 
 _load_env()
 
+_logs_dir = ROOT / "logs"
+_logs_dir.mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [bridge] %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(str(_logs_dir / "bridge.log"), encoding="utf-8"),
+    ],
 )
 log = logging.getLogger("bridge")
 
-from telegram_mcp._bot import admin_chat_ids, bus, send_message, edit_message
+from telegram_mcp._bot import (
+    admin_chat_ids, bus, send_message, edit_message,
+    send_inline_keyboard, answer_callback,
+)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 _CWD = r"C:\tmp"  # neutral dir — no CLAUDE.md here to pollute Claude's context
-_TIMEOUT = 120          # max seconds per claude call
+_TIMEOUT = 155          # max seconds per claude call (Node.js cold start ~120s + margin)
 _TG_MAX = 3800          # leave room below Telegram's 4096-char limit
 _STREAM_INTERVAL = 1.5  # seconds between live edit_message updates
 _HISTORY_TURNS = 6      # recent Q&A pairs included as context
@@ -176,6 +185,30 @@ _db = _init_db()
 # contention (6 simultaneous Node.js processes → 4× slowdown on Windows).
 # Also ensures history is built/recorded in message order.
 _claude_lock = threading.Lock()
+
+
+# ── Client session state machine ──────────────────────────────────────────────
+
+class _Stage(Enum):
+    IDLE             = "idle"
+    SELECTING_TYPE   = "selecting_type"
+    AWAITING_FILES   = "awaiting_files"
+    IN_SESSION       = "in_session"
+
+
+@dataclass
+class _Session:
+    chat_id: int
+    stage: _Stage           = _Stage.IDLE
+    assessment_type: str    = ""
+    files: list[str]        = field(default_factory=list)
+    last_scan_ts: float     = 0.0   # epoch of last Downloads scan
+    question_count: int     = 0
+    msg_id: int | None      = None  # current button-message id
+
+
+_sessions: dict[int, _Session] = {}
+_sessions_lock = threading.Lock()
 
 
 def _get_turns(chat_id: int) -> list[tuple[str, str]]:
@@ -514,7 +547,10 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass  # process tree already killed by _kill_on_timeout; don't block
 
     if _did_timeout.is_set():
         raise subprocess.TimeoutExpired("claude", _TIMEOUT)
