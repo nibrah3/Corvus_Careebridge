@@ -113,7 +113,7 @@ def _check() -> None:
 
     if not _process_running("telegram_claude_bridge"):
         print("[watchdog] telegram_claude_bridge DOWN — restarting")
-        _start_bg(BRIDGE_SCRIPT)
+        _start_bg(BRIDGE_SCRIPT, args=["--stream"])
         issues.append("telegram_claude_bridge was down — restarted automatically")
 
     if MIKE_MODE:
@@ -138,6 +138,11 @@ def _check() -> None:
 def main() -> None:
     mode = f"Mike-only (CORVUS_ACCOUNT={CORVUS_ACCOUNT})" if MIKE_MODE else "multi-account"
     print(f"[watchdog] Starting — {mode} mode, health checks every {CHECK_INTERVAL}s")
+    # Wait for Task Scheduler entries and startup-folder VBS scripts to finish
+    # launching their processes before the first health check, to avoid spawning
+    # duplicate instances of master_dispatcher or telegram_claude_bridge.
+    print("[watchdog] Waiting 45s for boot-time processes to settle...")
+    time.sleep(45)
     while True:
         try:
             _check()
