@@ -162,6 +162,9 @@ class _UpdateBus:
                 q = self._cb_waiters.get(mid)
             if q:
                 q.put(cq)
+            else:
+                # No tool is waiting for this button — route to listener (bridge)
+                self.listener_queue.put({"_cq": cq})
 
         if msg:
             chat_id = msg.get("chat", {}).get("id")
