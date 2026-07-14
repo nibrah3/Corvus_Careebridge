@@ -2,8 +2,16 @@
 telegram_claude_bridge.py — Forward Telegram DMs to Claude Code CLI.
 
 Each admin DM is forwarded to `claude --print` as a subprocess.
-Conversation history is kept in-process so replies have context without
-needing --continue (which conflicts with the active desktop session).
+Conversation history is persisted in SQLite (bridge_history.db) so replies
+survive bridge restarts. Memories (key/value facts) persist across
+/clearhistory.
+
+Smart routing:
+  - Screen queries (keywords: screen/browser/visible/etc.)
+        → claude-sonnet-4-6 + capture/gemini MCPs
+  - Conversational messages
+        → claude-haiku-4-5-20251001, no MCPs, no tool overhead
+    Haiku has no extended thinking → ~5-15s vs Sonnet's ~70-90s.
 
 Streaming mode (--stream): edits the Telegram message live as tokens arrive.
 
@@ -16,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -57,7 +66,7 @@ _CWD = str(ROOT)
 _TIMEOUT = 90           # max seconds per claude call
 _TG_MAX = 3800          # leave room below Telegram's 4096-char limit
 _STREAM_INTERVAL = 1.5  # seconds between live edit_message updates
-_HISTORY_TURNS = 6      # number of recent Q&A pairs to include as context
+_HISTORY_TURNS = 6      # recent Q&A pairs included as context
 _ADMINS: list[int] = []
 
 _STREAM_MODE = "--stream" in sys.argv
@@ -97,12 +106,40 @@ SCREEN READING RULE (absolute, no exceptions):
 [End system rules]
 """
 
-# ── In-process conversation history ──────────────────────────────────────────
-# Keeps last N turns so each claude call has context without --continue.
-# Keys are chat_id; values are deque of (user_msg, assistant_reply) tuples.
+# ── SQLite persistent history ─────────────────────────────────────────────────
+# turns: per-user conversation history (cleared by /clearhistory)
+# memories: persistent key/value facts per user (survive /clearhistory)
 
-_history: dict[int, deque[tuple[str, str]]] = {}
-_history_lock = threading.Lock()
+_DB_PATH = ROOT / "bridge_history.db"
+_db_lock = threading.Lock()  # protects all DB writes
+
+
+def _init_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS turns (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id  INTEGER NOT NULL,
+            ts       REAL    NOT NULL,
+            user     TEXT    NOT NULL,
+            reply    TEXT    NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_turns_chat ON turns(chat_id, id);
+
+        CREATE TABLE IF NOT EXISTS memories (
+            chat_id  INTEGER NOT NULL,
+            key      TEXT    NOT NULL,
+            value    TEXT    NOT NULL,
+            updated  REAL    NOT NULL,
+            PRIMARY KEY (chat_id, key)
+        );
+    """)
+    conn.commit()
+    return conn
+
+
+_db = _init_db()
 
 # Serialize all Claude subprocess calls: one at a time prevents resource
 # contention (6 simultaneous Node.js processes → 4× slowdown on Windows).
@@ -110,12 +147,44 @@ _history_lock = threading.Lock()
 _claude_lock = threading.Lock()
 
 
+def _get_turns(chat_id: int) -> list[tuple[str, str]]:
+    rows = _db.execute(
+        "SELECT user, reply FROM turns WHERE chat_id=? ORDER BY id DESC LIMIT ?",
+        (chat_id, _HISTORY_TURNS),
+    ).fetchall()
+    return [(r["user"], r["reply"]) for r in reversed(rows)]
+
+
+def _get_memories(chat_id: int) -> list[tuple[str, str]]:
+    rows = _db.execute(
+        "SELECT key, value FROM memories WHERE chat_id=? ORDER BY updated",
+        (chat_id,),
+    ).fetchall()
+    return [(r["key"], r["value"]) for r in rows]
+
+
+def _record_turn(chat_id: int, user_text: str, reply: str) -> None:
+    with _db_lock:
+        _db.execute(
+            "INSERT INTO turns(chat_id, ts, user, reply) VALUES(?,?,?,?)",
+            (chat_id, time.time(), user_text, reply),
+        )
+        _db.commit()
+
+
 def _build_prompt(chat_id: int, user_text: str) -> str:
-    """Prepend system rules + recent conversation history so Claude has context."""
-    with _history_lock:
-        turns = list(_history.get(chat_id, []))
+    """Build full prompt: system rules + remembered facts + recent turns + current msg."""
+    with _db_lock:
+        turns = _get_turns(chat_id)
+        mems = _get_memories(chat_id)
 
     parts = [_SYSTEM_PROMPT]
+
+    if mems:
+        parts.append("[Remembered facts about this user]")
+        for k, v in mems:
+            parts.append(f"  {k}: {v}")
+        parts.append("")
 
     if turns:
         parts.append("[Previous conversation]\n")
@@ -128,13 +197,6 @@ def _build_prompt(chat_id: int, user_text: str) -> str:
         parts.append(user_text)
 
     return "\n".join(parts)
-
-
-def _record_turn(chat_id: int, user_text: str, reply: str) -> None:
-    with _history_lock:
-        if chat_id not in _history:
-            _history[chat_id] = deque(maxlen=_HISTORY_TURNS)
-        _history[chat_id].append((user_text, reply))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -166,31 +228,52 @@ def _send_chunks(chat_id: int, text: str) -> None:
 
 # ── Claude invocation ─────────────────────────────────────────────────────────
 
-_CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
+_CLAUDE_TOOLS_SCREEN = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
 _CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
 _MCP_CONFIG = str(ROOT / "bridge_mcp.json")
 
+# Fast model: no extended thinking, no MCP overhead → ~5-15s for conversational
+# Smart model: extended thinking + MCPs → used only for screen-reading queries
+_MODEL_FAST  = "claude-haiku-4-5-20251001"
+_MODEL_SMART = "claude-sonnet-4-6"
+
+_SCREEN_KEYWORDS = (
+    "screen", "on screen", "what's on", "what is on", "visible",
+    "screenshot", "browser", "window", "show me", "what do you see",
+    "can you see", "look at", "what can", "what's visible",
+)
+
+
+def _needs_screen(text: str) -> bool:
+    lower = text.lower()
+    return any(k in lower for k in _SCREEN_KEYWORDS)
+
 
 def _subprocess_env() -> dict:
-    """Force claude CLI into subscription (OAuth) mode.
-    Setting the key to "" instead of removing it skips the Windows keychain
-    lookup that adds ~40s of overhead when the key is absent entirely."""
+    """Force claude CLI into subscription (OAuth) mode."""
     env = os.environ.copy()
     env["ANTHROPIC_API_KEY"] = ""
     return env
 
 
-def _ask_claude_plain(prompt: str) -> str:
-    result = subprocess.run(
-        [
-            _CLAUDE_BIN, "--print",
-            "--output-format", "json",
-            "--allowedTools", _CLAUDE_TOOLS,
-            "--permission-mode", "acceptEdits",
+def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
+    model = _MODEL_SMART if screen else _MODEL_FAST
+    cmd = [
+        _CLAUDE_BIN, "--print",
+        "--output-format", "json",
+        "--model", model,
+        "--permission-mode", "acceptEdits",
+    ]
+    if screen:
+        cmd += [
+            "--allowedTools", _CLAUDE_TOOLS_SCREEN,
             "--mcp-config", _MCP_CONFIG,
             "--strict-mcp-config",
-            prompt,
-        ],
+        ]
+    cmd.append(prompt)
+
+    result = subprocess.run(
+        cmd,
         cwd=_CWD,
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -212,19 +295,27 @@ def _ask_claude_plain(prompt: str) -> str:
         return raw or "(Claude returned no output.)"
 
 
-def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]") -> str:
-    proc = subprocess.Popen(
-        [
-            _CLAUDE_BIN, "--print",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-            "--allowedTools", _CLAUDE_TOOLS,
-            "--permission-mode", "acceptEdits",
+def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
+                       screen: bool = False) -> str:
+    model = _MODEL_SMART if screen else _MODEL_FAST
+    cmd = [
+        _CLAUDE_BIN, "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--model", model,
+        "--permission-mode", "acceptEdits",
+    ]
+    if screen:
+        cmd += [
+            "--allowedTools", _CLAUDE_TOOLS_SCREEN,
             "--mcp-config", _MCP_CONFIG,
             "--strict-mcp-config",
-            prompt,
-        ],
+        ]
+    cmd.append(prompt)
+
+    proc = subprocess.Popen(
+        cmd,
         cwd=_CWD,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -280,11 +371,12 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]") -> str:
 
 
 def _handle_plain(chat_id: int, user_text: str) -> None:
+    screen = _needs_screen(user_text)
     send_message(chat_id, "Thinking...", parse_mode=None)
     with _claude_lock:
         prompt = _build_prompt(chat_id, user_text)
         try:
-            answer = _ask_claude_plain(prompt)
+            answer = _ask_claude_plain(prompt, screen=screen)
         except subprocess.TimeoutExpired:
             send_message(chat_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
             return
@@ -297,6 +389,7 @@ def _handle_plain(chat_id: int, user_text: str) -> None:
 
 
 def _handle_stream(chat_id: int, user_text: str) -> None:
+    screen = _needs_screen(user_text)
     resp = send_message(chat_id, "Thinking...", parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
@@ -317,7 +410,7 @@ def _handle_stream(chat_id: int, user_text: str) -> None:
     with _claude_lock:
         prompt = _build_prompt(chat_id, user_text)
         try:
-            final = _ask_claude_stream(prompt, _update)
+            final = _ask_claude_stream(prompt, _update, screen=screen)
         except subprocess.TimeoutExpired:
             if msg_id:
                 edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
@@ -376,9 +469,11 @@ def _handle(msg: dict) -> None:
                 log.error("Client stop failed: %s", e)
             return
 
-        # First contact — ping admin with chat_id so Mike can start the session manually
-        with _history_lock:
-            is_new = chat_id not in _history
+        # First contact — check DB for prior history
+        with _db_lock:
+            is_new = _db.execute(
+                "SELECT 1 FROM turns WHERE chat_id=? LIMIT 1", (chat_id,)
+            ).fetchone() is None
         if is_new:
             user_str = f"@{username}" if username else str(chat_id)
             for admin_id in _ADMINS:
@@ -391,8 +486,6 @@ def _handle(msg: dict) -> None:
                 except Exception:
                     pass
             send_message(chat_id, "Connected! Your guide will start your session when ready.", parse_mode=None)
-            with _history_lock:
-                _history[chat_id] = deque(maxlen=_HISTORY_TURNS)
             return
 
         # In-session question → route to master for Claude to answer
@@ -404,7 +497,6 @@ def _handle(msg: dict) -> None:
     lower = text.lower()
 
     # ── Admin shortcut: start <chat_id> [platform] ───────────────────────────
-    # Quick form: start 1234567890  or  start 1234567890 imocha
     if lower.startswith("start "):
         parts = text.split()
         if len(parts) >= 2 and parts[1].isdigit():
@@ -427,7 +519,6 @@ def _handle(msg: dict) -> None:
             return
 
     # ── Admin shortcut: start session ─────────────────────────────────────────
-    # Long form: start session <client_chat_id> <platform>
     if lower.startswith("start session "):
         parts = text.split()
         if len(parts) >= 3:
@@ -453,7 +544,6 @@ def _handle(msg: dict) -> None:
         return
 
     # ── Admin shortcut: end session ───────────────────────────────────────────
-    # Usage: end session <session_id>
     if lower.startswith("end session "):
         parts = text.split()
         if len(parts) >= 3:
@@ -479,9 +569,52 @@ def _handle(msg: dict) -> None:
         return
 
     if lower == "/clearhistory":
-        with _history_lock:
-            _history.pop(chat_id, None)
-        send_message(chat_id, "Conversation history cleared. Starting fresh.", parse_mode=None)
+        with _db_lock:
+            _db.execute("DELETE FROM turns WHERE chat_id=?", (chat_id,))
+            _db.commit()
+        send_message(chat_id, "Conversation history cleared. Memories retained.", parse_mode=None)
+        return
+
+    # ── Memory commands ────────────────────────────────────────────────────────
+
+    if lower in ("/memory", "memory", "/memories"):
+        with _db_lock:
+            rows = _db.execute(
+                "SELECT key, value FROM memories WHERE chat_id=? ORDER BY updated",
+                (chat_id,),
+            ).fetchall()
+        if rows:
+            lines = [f"  {r['key']}: {r['value']}" for r in rows]
+            send_message(chat_id, "Stored memories:\n" + "\n".join(lines), parse_mode=None)
+        else:
+            send_message(chat_id, "No memories stored yet.\nUse /remember key: value to add one.", parse_mode=None)
+        return
+
+    if lower.startswith("/remember "):
+        rest = text[len("/remember "):].strip()
+        if ":" in rest:
+            key, _, value = rest.partition(":")
+            key, value = key.strip(), value.strip()
+            with _db_lock:
+                _db.execute(
+                    "INSERT OR REPLACE INTO memories(chat_id,key,value,updated) VALUES(?,?,?,?)",
+                    (chat_id, key, value, time.time()),
+                )
+                _db.commit()
+            send_message(chat_id, f"Remembered: {key} = {value}", parse_mode=None)
+        else:
+            send_message(chat_id, "Usage: /remember key: value\nExample: /remember name: Alex", parse_mode=None)
+        return
+
+    if lower.startswith("/forget "):
+        key = text[len("/forget "):].strip()
+        with _db_lock:
+            cur = _db.execute("DELETE FROM memories WHERE chat_id=? AND key=?", (chat_id, key))
+            _db.commit()
+        if cur.rowcount:
+            send_message(chat_id, f"Forgotten: {key}", parse_mode=None)
+        else:
+            send_message(chat_id, f"No memory found for: {key}", parse_mode=None)
         return
 
     if lower in ("/help", "help"):
@@ -493,11 +626,16 @@ def _handle(msg: dict) -> None:
             "  start <chat_id> <platform> — start on named platform\n"
             "  end session <session_id>   — end a session\n"
             "  pool / sessions            — show active sessions\n\n"
+            "Conversation:\n"
+            "  /clearhistory  — clear chat turns (memories kept)\n"
+            "  /memory        — list stored memories\n"
+            "  /remember key: value — store a persistent memory\n"
+            "  /forget key    — delete a stored memory\n\n"
             "Bridge:\n"
             "  /ping          — health check\n"
-            "  /clearhistory  — reset conversation\n"
             "  /help          — this message\n\n"
             f"Mode: {'streaming' if _STREAM_MODE else 'plain'}  |  Timeout: {_TIMEOUT}s\n"
+            f"Models: chat={_MODEL_FAST}  screen={_MODEL_SMART}\n"
             f"CWD: {_CWD}",
             parse_mode=None,
         )
@@ -517,6 +655,8 @@ def main() -> None:
     _ADMINS = admin_chat_ids()
     mode = "streaming" if _STREAM_MODE else "plain"
     log.info("Bridge starting (%s mode) — admins: %s", mode, _ADMINS)
+    log.info("Models: chat=%s  screen=%s", _MODEL_FAST, _MODEL_SMART)
+    log.info("DB: %s", _DB_PATH)
 
     bus.start()
     for cid in _ADMINS:
