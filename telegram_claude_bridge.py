@@ -85,16 +85,28 @@ WHAT THIS SERVICE DOES:
 - This is a general on-screen assistance service — NOT a job-finding service
   and NOT an online school enrollment service
 
-CONVERSATION HISTORY RULE (critical):
-- The user prompt may include a [Previous conversation] block.
-- That block contains ACTUAL dialogue that happened in this session.
-- Use it to answer back-references ("what's my name?", "what did I say earlier?",
-  "earlier I mentioned X — what was it?", etc.)
-- Do NOT search for files or external logs — the [Previous conversation] block IS
-  the history. Answer directly from what it contains.
-- Do NOT confuse conversation history with the /remember memory system. They are
-  separate. "What's my name?" should be answered from [Previous conversation], not
-  from stored /remember keys.
+CONVERSATION HISTORY RULE (critical — read this carefully):
+- Your prompt includes a <conversation_history> block containing the REAL dialogue
+  from this session. Each <turn> has what the user said and what you replied.
+- Use <conversation_history> to answer ANY back-reference:
+    "what's my name?" → find where user introduced themselves in a <turn>
+    "what did I say earlier?" → read the <turn> entries
+    "earlier I mentioned X — what was it?" → look in <turn> entries
+- Answer DIRECTLY from what is in <conversation_history>. Do NOT say you have
+  no memory of past messages — the history IS in your prompt right now.
+- CRITICAL: The user's name is whatever they stated in <conversation_history>.
+  NEVER use system account names (e.g. "Mike") as the user's name. The only
+  names you know are ones explicitly said by the user during this session.
+- Do NOT confuse <conversation_history> with <remembered_facts> (the /remember
+  system). They are separate. "What's my name?" is answered from
+  <conversation_history>, not from stored /remember keys.
+
+TOOL USE RULE:
+- For conversational messages, answer directly from <conversation_history> and
+  your training knowledge. Do NOT invoke Bash, Read, Glob, or any file-access
+  tools. Do NOT search for files or external logs.
+- Only use screen-capture tools when the user explicitly asks about something
+  on screen.
 
 CRITICAL OVERRIDES:
 1. NEVER show a menu, NEVER call AskUserQuestion. Respond directly to the user.
@@ -197,12 +209,11 @@ def _build_prompt(chat_id: int, user_text: str) -> str:
         parts.append("")
 
     if turns:
-        parts.append("[Previous conversation — actual session dialogue; use to answer any back-references]\n")
+        parts.append("<conversation_history>")
         for u, a in turns:
-            parts.append(f"User: {u}")
-            parts.append(f"Assistant: {a}\n")
-        parts.append("[Current message]")
-        parts.append(f"User: {user_text}")
+            parts.append(f"<turn><user>{u}</user><assistant>{a}</assistant></turn>")
+        parts.append("</conversation_history>")
+        parts.append(f"<current_message>{user_text}</current_message>")
     else:
         parts.append(user_text)
 
