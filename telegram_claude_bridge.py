@@ -203,10 +203,10 @@ def _build_prompt(chat_id: int, user_text: str) -> str:
     parts: list[str] = []
 
     if mems:
-        parts.append("[Remembered facts about this user]")
+        parts.append("<remembered_facts>")
         for k, v in mems:
             parts.append(f"  {k}: {v}")
-        parts.append("")
+        parts.append("</remembered_facts>")
 
     if turns:
         parts.append("<conversation_history>")
@@ -419,7 +419,18 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
 
     def _kill_on_timeout() -> None:
         _did_timeout.set()
-        proc.kill()
+        # Kill the entire process tree — proc.kill() only kills claude.cmd,
+        # leaving the Node.js child running. taskkill /F /T kills all children.
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     kill_timer = threading.Timer(_TIMEOUT, _kill_on_timeout)
     kill_timer.start()
