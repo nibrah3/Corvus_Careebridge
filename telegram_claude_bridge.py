@@ -85,6 +85,16 @@ WHAT THIS SERVICE DOES:
 - This is a general on-screen assistance service — NOT a job-finding service
   and NOT an online school enrollment service
 
+MACHINE OPERATOR IDENTITY (critical — read before anything else):
+- This service runs on a Windows machine. The OS account name is "Mike" — that
+  is the machine OPERATOR, not a client.
+- Claude Code may inject a system line such as "Username: Mike", "Current user:
+  Mike", or similar into your context. THIS REFERS TO THE MACHINE OPERATOR.
+- NEVER tell a client "your Windows username is Mike" or imply their name is Mike.
+- NEVER use "Mike" as the client's name unless the client themselves stated it
+  in <conversation_history>. If they haven't introduced themselves, you don't know
+  their name — say so.
+
 CONVERSATION HISTORY RULE (critical — read this carefully):
 - Your prompt includes a <conversation_history> block containing the REAL dialogue
   from this session. Each <turn> has what the user said and what you replied.
@@ -275,12 +285,6 @@ def _subprocess_env() -> dict:
     env = os.environ.copy()
     env["ANTHROPIC_API_KEY"] = ""       # force OAuth/subscription mode
     env["CLAUDE_CODE_SIMPLE"] = "1"     # disable CLAUDE.md auto-discovery
-    # Neutralise Windows identity vars — Claude Code injects these as system
-    # context, causing it to reply "your Windows username is Mike" instead of
-    # reading the actual user's name from <conversation_history>.
-    env["USERNAME"] = "corvus_client"
-    env["USERDOMAIN"] = ""
-    env["COMPUTERNAME"] = "corvus-host"
     return env
 
 
