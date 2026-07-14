@@ -272,17 +272,35 @@ def _startupinfo() -> subprocess.STARTUPINFO:
     return si
 
 
-# Natural-language status messages shown while Claude is thinking.
-# Phrased as first-person actions, never mentioning technical internals.
+# Natural-language status messages — initial reply sent immediately.
+# Phrased as first-person narration; no technical terms ever mentioned.
 _STATUS_SCREEN = [
     "Let me check the screen...",
     "Let me have a look at what's on screen...",
     "Let me see what's visible right now...",
+    "Hang on while I take a look...",
 ]
 _STATUS_CHAT = [
     "On it...",
     "Let me think about that...",
     "Give me a moment...",
+    "Hang tight, I'm looking into that...",
+]
+
+# Progressive narration shown every ~8s during the cold-start gap,
+# until real response tokens start arriving. Keeps the user in the loop
+# without exposing anything about what the system is actually doing.
+_PROGRESS_SCREEN = [
+    "Taking a closer look...",
+    "Reading through what I can see...",
+    "Still scanning, nearly there...",
+    "Just about done...",
+]
+_PROGRESS_CHAT = [
+    "Thinking through that for you...",
+    "Still with you, working on it...",
+    "Almost ready...",
+    "Just a few more seconds...",
 ]
 
 _status_counter = 0
