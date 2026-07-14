@@ -210,6 +210,9 @@ class _Session:
 _sessions: dict[int, _Session] = {}
 _sessions_lock = threading.Lock()
 
+# Admins who have sent /testclient are temporarily routed through the client flow
+_test_client_ids: set[int] = set()
+
 
 def _get_turns(chat_id: int) -> list[tuple[str, str]]:
     rows = _db.execute(
