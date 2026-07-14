@@ -515,7 +515,11 @@ def _handle_stream(chat_id: int, user_text: str) -> None:
         except subprocess.TimeoutExpired:
             stream_started.set()
             if msg_id:
-                edit_message(chat_id, msg_id, f"Timed out after {_TIMEOUT}s.", parse_mode=None)
+                try:
+                    edit_message(chat_id, msg_id, "Sorry, that took too long. Please try again.", parse_mode=None)
+                except Exception:
+                    pass
+            send_message(chat_id, f"Sorry, that took too long ({_TIMEOUT}s). Please try again.", parse_mode=None)
             return
         except Exception as exc:
             stream_started.set()
