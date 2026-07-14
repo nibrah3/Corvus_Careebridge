@@ -62,7 +62,7 @@ from telegram_mcp._bot import admin_chat_ids, bus, send_message, edit_message
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-_CWD = str(ROOT)
+_CWD = r"C:\tmp"  # neutral dir — no CLAUDE.md here to pollute Claude's context
 _TIMEOUT = 90           # max seconds per claude call
 _TG_MAX = 3800          # leave room below Telegram's 4096-char limit
 _STREAM_INTERVAL = 1.5  # seconds between live edit_message updates
@@ -173,12 +173,16 @@ def _record_turn(chat_id: int, user_text: str, reply: str) -> None:
 
 
 def _build_prompt(chat_id: int, user_text: str) -> str:
-    """Build full prompt: system rules + remembered facts + recent turns + current msg."""
+    """Build context-only prompt: memories + recent turns + current message.
+
+    _SYSTEM_PROMPT is passed separately via --system-prompt CLI flag so it
+    overrides CLAUDE.md rather than competing with it as plain text.
+    """
     with _db_lock:
         turns = _get_turns(chat_id)
         mems = _get_memories(chat_id)
 
-    parts = [_SYSTEM_PROMPT]
+    parts: list[str] = []
 
     if mems:
         parts.append("[Remembered facts about this user]")
@@ -301,6 +305,7 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
         "--output-format", "json",
         "--model", model,
         "--permission-mode", "acceptEdits",
+        "--system-prompt", _SYSTEM_PROMPT,  # replaces default (incl. any CLAUDE.md)
     ]
     if screen:
         cmd += [
