@@ -893,35 +893,14 @@ def _handle(msg: dict) -> None:
     # ── Non-admin (client) messages ────────────────────────────────────────────
     if chat_id not in _ADMINS:
         log.info("client chat=%s  %r", chat_id, text[:60])
-        lower = text.lower()
 
-        # Client help / start
-        if lower in ("/start", "/help", "help", "hi", "hello"):
-            send_message(
-                chat_id,
-                "Hi! I'm Corvus, your on-screen AI assistant.\n\n"
-                "Once your remote session is active, just ask me anything about what you see on screen — "
-                "I can read content, explain steps, guide you through pages, and answer questions.\n\n"
-                "If your session hasn't started yet, your guide will connect you shortly.",
-                parse_mode=None,
-            )
-            return
+        with _sessions_lock:
+            sess = _sessions.get(chat_id)
+            if sess is None:
+                sess = _Session(chat_id=chat_id)
+                _sessions[chat_id] = sess
 
-        # Client signalling they're done
-        if lower in ("stop", "done", "end", "exit"):
-            try:
-                from corvus_hack.db import get_client_session
-                sess = get_client_session(chat_id)
-                if sess:
-                    _master_post("/admin/end_session", {"session_id": sess["session_id"]})
-                    send_message(chat_id, "Session ended. Thanks!", parse_mode=None)
-                else:
-                    send_message(chat_id, "No active session.", parse_mode=None)
-            except Exception as e:
-                log.error("Client stop failed: %s", e)
-            return
-
-        # First contact — check DB for prior history
+        # Notify admin on first contact
         with _db_lock:
             is_new = _db.execute(
                 "SELECT 1 FROM turns WHERE chat_id=? LIMIT 1", (chat_id,)
@@ -932,16 +911,14 @@ def _handle(msg: dict) -> None:
                 try:
                     send_message(
                         admin_id,
-                        f"New client: {user_str}  (chat_id: {chat_id})\nSays: {text[:200]}\n\nTo start their session: start {chat_id}",
+                        f"New client: {user_str}  (chat_id: {chat_id})\nFirst message: {text[:200]}",
                         parse_mode=None,
                     )
                 except Exception:
                     pass
-            send_message(chat_id, "Connected! Your guide will start your session when ready.", parse_mode=None)
-            return
 
-        # In-session question → route to master for Claude to answer
-        _master_post("/client/message", {"chat_id": chat_id, "text": text})
+        # Any free-text from a client is nudged back to buttons
+        _show_client_prompt(chat_id, sess)
         return
 
     log.info("chat=%s  %r", chat_id, text[:80])
