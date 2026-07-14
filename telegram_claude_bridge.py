@@ -349,6 +349,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
         "--include-partial-messages",
         "--model", model,
         "--permission-mode", "acceptEdits",
+        "--system-prompt", _SYSTEM_PROMPT,  # replaces default (incl. any CLAUDE.md)
     ]
     if screen:
         cmd += [
@@ -374,6 +375,14 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
     accumulated = ""
     last_update = 0.0
     final_result = ""
+    _did_timeout = threading.Event()
+
+    def _kill_on_timeout() -> None:
+        _did_timeout.set()
+        proc.kill()
+
+    kill_timer = threading.Timer(_TIMEOUT, _kill_on_timeout)
+    kill_timer.start()
 
     try:
         for raw_line in proc.stdout:  # type: ignore[union-attr]
@@ -404,10 +413,15 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
             except json.JSONDecodeError:
                 accumulated += line + "\n"
     finally:
+        kill_timer.cancel()
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait()
+
+    if _did_timeout.is_set():
+        raise subprocess.TimeoutExpired("claude", _TIMEOUT)
 
     return final_result or accumulated.strip() or "(Claude returned no output.)"
 
