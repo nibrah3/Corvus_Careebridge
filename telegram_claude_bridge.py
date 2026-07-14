@@ -157,9 +157,11 @@ _MCP_CONFIG = str(ROOT / "bridge_mcp.json")
 
 
 def _subprocess_env() -> dict:
-    """Force claude CLI into subscription mode by removing ANTHROPIC_API_KEY."""
+    """Force claude CLI into subscription (OAuth) mode.
+    Setting the key to "" instead of removing it skips the Windows keychain
+    lookup that adds ~40s of overhead when the key is absent entirely."""
     env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
+    env["ANTHROPIC_API_KEY"] = ""
     return env
 
 
