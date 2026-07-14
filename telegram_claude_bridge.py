@@ -1049,6 +1049,20 @@ def _handle(msg: dict) -> None:
             send_message(chat_id, f"No memory found for: {key}", parse_mode=None)
         return
 
+    if lower == "/testclient":
+        _test_client_ids.add(chat_id)
+        with _sessions_lock:
+            _sessions[chat_id] = _Session(chat_id=chat_id)
+        send_message(chat_id, "Test-client mode ON. You are now in the client flow. Send any text to begin.", parse_mode=None)
+        return
+
+    if lower == "/stopclienttest":
+        _test_client_ids.discard(chat_id)
+        with _sessions_lock:
+            _sessions.pop(chat_id, None)
+        send_message(chat_id, "Test-client mode OFF. Back to admin mode.", parse_mode=None)
+        return
+
     if lower in ("/help", "help"):
         send_message(
             chat_id,
@@ -1065,6 +1079,8 @@ def _handle(msg: dict) -> None:
             "  /forget key    — delete a stored memory\n\n"
             "Bridge:\n"
             "  /ping          — health check\n"
+            "  /testclient    — enter client button-flow for testing\n"
+            "  /stopclienttest — return to admin mode\n"
             "  /help          — this message\n\n"
             f"Mode: {'streaming' if _STREAM_MODE else 'plain'}  |  Timeout: {_TIMEOUT}s\n"
             f"Models: chat={_MODEL_FAST}  screen={_MODEL_SMART}\n"
