@@ -262,4 +262,14 @@ def admin_chat_ids() -> list[int]:
                 ids.append(int(v))
             except ValueError:
                 pass
+    # Also parse comma-separated TELEGRAM_ADMIN_IDS
+    for part in os.environ.get("TELEGRAM_ADMIN_IDS", "").split(","):
+        part = part.strip()
+        if part:
+            try:
+                uid = int(part)
+                if uid not in ids:
+                    ids.append(uid)
+            except ValueError:
+                pass
     return ids or [7994812711]
