@@ -217,6 +217,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]") -> str:
         text=True,
         encoding="utf-8",
         env=_subprocess_env(),
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
     accumulated = ""
