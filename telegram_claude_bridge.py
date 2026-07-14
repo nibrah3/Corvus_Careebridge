@@ -256,6 +256,44 @@ def _subprocess_env() -> dict:
     return env
 
 
+def _startupinfo() -> subprocess.STARTUPINFO:
+    """Return STARTUPINFO that hides the console window on Windows.
+
+    CREATE_NO_WINDOW alone doesn't always suppress .cmd wrappers; SW_HIDE
+    covers the remaining cases (batch file child processes, etc.).
+    """
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    return si
+
+
+# Natural-language status messages shown while Claude is thinking.
+# Phrased as first-person actions, never mentioning technical internals.
+_STATUS_SCREEN = [
+    "Let me check the screen...",
+    "Let me have a look at what's on screen...",
+    "Let me see what's visible right now...",
+]
+_STATUS_CHAT = [
+    "On it...",
+    "Let me think about that...",
+    "Give me a moment...",
+]
+
+_status_counter = 0
+_status_lock = threading.Lock()
+
+
+def _thinking_message(screen: bool) -> str:
+    global _status_counter
+    pool = _STATUS_SCREEN if screen else _STATUS_CHAT
+    with _status_lock:
+        idx = _status_counter % len(pool)
+        _status_counter += 1
+    return pool[idx]
+
+
 def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
     model = _MODEL_SMART if screen else _MODEL_FAST
     cmd = [
@@ -281,6 +319,7 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
         encoding="utf-8",
         timeout=_TIMEOUT,
         env=_subprocess_env(),
+        startupinfo=_startupinfo(),
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     raw = (result.stdout or "").strip()
@@ -323,6 +362,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
         text=True,
         encoding="utf-8",
         env=_subprocess_env(),
+        startupinfo=_startupinfo(),
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
@@ -372,7 +412,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
 
 def _handle_plain(chat_id: int, user_text: str) -> None:
     screen = _needs_screen(user_text)
-    send_message(chat_id, "Thinking...", parse_mode=None)
+    send_message(chat_id, _thinking_message(screen), parse_mode=None)
     with _claude_lock:
         prompt = _build_prompt(chat_id, user_text)
         try:
@@ -390,7 +430,7 @@ def _handle_plain(chat_id: int, user_text: str) -> None:
 
 def _handle_stream(chat_id: int, user_text: str) -> None:
     screen = _needs_screen(user_text)
-    resp = send_message(chat_id, "Thinking...", parse_mode=None)
+    resp = send_message(chat_id, _thinking_message(screen), parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
         msg_id = resp["result"]["message_id"]
