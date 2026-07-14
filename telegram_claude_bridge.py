@@ -495,6 +495,18 @@ def _handle(msg: dict) -> None:
         log.info("client chat=%s  %r", chat_id, text[:60])
         lower = text.lower()
 
+        # Client help / start
+        if lower in ("/start", "/help", "help", "hi", "hello"):
+            send_message(
+                chat_id,
+                "Hi! I'm Corvus, your on-screen AI assistant.\n\n"
+                "Once your remote session is active, just ask me anything about what you see on screen — "
+                "I can read content, explain steps, guide you through pages, and answer questions.\n\n"
+                "If your session hasn't started yet, your guide will connect you shortly.",
+                parse_mode=None,
+            )
+            return
+
         # Client signalling they're done
         if lower in ("stop", "done", "end", "exit"):
             try:
