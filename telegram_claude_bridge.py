@@ -1076,6 +1076,63 @@ def _handle(msg: dict) -> None:
         _handle_plain(chat_id, text)
 
 
+# ── Callback dispatcher ───────────────────────────────────────────────────────
+
+
+def _handle_callback(cq: dict) -> None:
+    """Dispatch inline button taps from non-admin (client) users."""
+    chat_id: int = cq.get("from", {}).get("id", 0) or cq.get("message", {}).get("chat", {}).get("id", 0)
+    data: str = cq.get("data", "")
+    cq_id: str = cq.get("id", "")
+
+    if not chat_id or not data:
+        return
+    if chat_id in _ADMINS:
+        return  # admin callbacks are handled elsewhere (MCP tools)
+
+    log.info("client callback chat=%s data=%r", chat_id, data)
+
+    # Acknowledge the tap immediately so Telegram removes the spinner
+    try:
+        answer_callback(cq_id)
+    except Exception:
+        pass
+
+    with _sessions_lock:
+        sess = _sessions.get(chat_id)
+        if sess is None:
+            sess = _Session(chat_id=chat_id)
+            _sessions[chat_id] = sess
+
+    if data == "start_assessment":
+        _show_type_picker(chat_id, sess)
+
+    elif data in ("type_mc", "type_written", "type_media", "type_mixed"):
+        _handle_type_selected(chat_id, sess, data)
+
+    elif data == "files_done":
+        _handle_files_step(chat_id, sess, has_files=True)
+
+    elif data == "no_files":
+        _handle_files_step(chat_id, sess, has_files=False)
+
+    elif data == "answer_q":
+        if sess.stage == _Stage.IN_SESSION:
+            threading.Thread(
+                target=_handle_answer_question,
+                args=(chat_id, sess),
+                daemon=True,
+            ).start()
+        else:
+            _show_welcome(chat_id, sess)
+
+    elif data == "done_session":
+        _handle_done_session(chat_id, sess)
+
+    else:
+        log.warning("Unknown callback data=%r from chat=%s", data, chat_id)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -1088,6 +1145,22 @@ def main() -> None:
     log.info("DB: %s", _DB_PATH)
 
     bus.start()
+
+    # Prewarm: run a trivial Claude call so Node.js JIT is hot before the
+    # first real client query. Runs in background; holds _claude_lock while
+    # warming so real calls queue behind it rather than racing.
+    def _prewarm() -> None:
+        log.info("Prewarm: acquiring Claude lock...")
+        with _claude_lock:
+            try:
+                log.info("Prewarm: calling Claude...")
+                _ask_claude_plain("Reply with only the word ready.", screen=False)
+                log.info("Prewarm: done — Node.js is warm.")
+            except Exception as e:
+                log.warning("Prewarm failed (non-fatal): %s", e)
+
+    threading.Thread(target=_prewarm, daemon=True, name="prewarm").start()
+
     for cid in _ADMINS:
         try:
             send_message(
@@ -1101,8 +1174,14 @@ def main() -> None:
     log.info("Listening for Telegram messages...")
     while True:
         try:
-            msg = bus.listener_queue.get(timeout=5)
-            threading.Thread(target=_handle, args=(msg,), daemon=True).start()
+            item = bus.listener_queue.get(timeout=5)
+            if "_cq" in item:
+                # Inline button tap — dispatch to callback handler
+                threading.Thread(
+                    target=_handle_callback, args=(item["_cq"],), daemon=True
+                ).start()
+            else:
+                threading.Thread(target=_handle, args=(item,), daemon=True).start()
         except Exception:
             pass
 
