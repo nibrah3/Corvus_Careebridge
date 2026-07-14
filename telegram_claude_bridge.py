@@ -293,6 +293,225 @@ def _send_chunks(chat_id: int, text: str) -> None:
         send_message(chat_id, prefix + chunk, parse_mode=None)
 
 
+# ── Assessment session helpers ────────────────────────────────────────────────
+
+
+def _find_recent_downloads(since: float = 0.0) -> list[str]:
+    """Return paths from ~/Downloads modified after `since` epoch (default: last 15 min)."""
+    dl = Path.home() / "Downloads"
+    cutoff = since if since > 0 else (time.time() - 900)
+    found: list[str] = []
+    if dl.exists():
+        for p in dl.iterdir():
+            if p.is_file() and p.stat().st_mtime >= cutoff:
+                found.append(str(p))
+    return sorted(found, key=lambda f: Path(f).stat().st_mtime)
+
+
+def _send_btn(chat_id: int, text: str, rows: list[list[tuple[str, str]]]) -> int | None:
+    resp = send_inline_keyboard(chat_id, text, rows)
+    if resp.get("ok"):
+        return resp["result"]["message_id"]
+    return None
+
+
+def _show_welcome(chat_id: int, sess: _Session) -> None:
+    sess.stage = _Stage.IDLE
+    mid = _send_btn(
+        chat_id,
+        "Hi! I'm Corvus, your AI assessment assistant.\n\n"
+        "When you're on the assessment site and ready to start, tap the button below.",
+        [[("Start Assessment", "start_assessment")]],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _show_type_picker(chat_id: int, sess: _Session) -> None:
+    sess.stage = _Stage.SELECTING_TYPE
+    mid = _send_btn(
+        chat_id,
+        "What type of assessment is this?",
+        [
+            [("Multiple Choice", "type_mc"), ("Written / Essay", "type_written")],
+            [("Video / Audio Based", "type_media"), ("Mixed / Other", "type_mixed")],
+        ],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _handle_type_selected(chat_id: int, sess: _Session, data: str) -> None:
+    types = {
+        "type_mc":      "Multiple Choice",
+        "type_written": "Written / Essay",
+        "type_media":   "Video / Audio Based",
+        "type_mixed":   "Mixed / Other",
+    }
+    sess.assessment_type = types.get(data, "General")
+    sess.stage = _Stage.AWAITING_FILES
+    sess.last_scan_ts = time.time()
+    mid = _send_btn(
+        chat_id,
+        f"Got it — {sess.assessment_type} assessment.\n\n"
+        "Please download all files from the assessment page (PDFs, audio clips, videos, instruction sheets).\n"
+        "Tap when done — or No Files if there's nothing to download.",
+        [[("Files Downloaded", "files_done"), ("No Files", "no_files")]],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _handle_files_step(chat_id: int, sess: _Session, has_files: bool) -> None:
+    if has_files:
+        new_files = _find_recent_downloads(since=sess.last_scan_ts)
+        if new_files:
+            # Accumulate — don't overwrite; earlier files stay in the list
+            existing = set(sess.files)
+            sess.files.extend(f for f in new_files if f not in existing)
+            names = ", ".join(Path(f).name for f in new_files[:5])
+            extra = f" (+{len(new_files)-5} more)" if len(new_files) > 5 else ""
+            file_info = f"Found {len(new_files)} new file(s): {names}{extra}"
+        else:
+            file_info = "No new files detected in Downloads — I'll rely on the screen."
+        sess.last_scan_ts = time.time()
+    else:
+        file_info = "No files — I'll answer from what's on screen."
+
+    sess.stage = _Stage.IN_SESSION
+    mid = _send_btn(
+        chat_id,
+        f"{file_info}\n\nNavigate to the first question, then tap Answer Question.",
+        [[("Answer Question", "answer_q")], [("Done", "done_session")]],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _show_in_session_buttons(chat_id: int, sess: _Session) -> None:
+    mid = _send_btn(
+        chat_id,
+        "Move to the next question when ready, or tap Done to finish.",
+        [[("Answer Next Question", "answer_q")], [("Done", "done_session")]],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _handle_answer_question(chat_id: int, sess: _Session) -> None:
+    sess.question_count += 1
+    qn = sess.question_count
+
+    # Scan for files added since last scan (e.g., audio for new question)
+    new_files = _find_recent_downloads(since=sess.last_scan_ts)
+    if new_files:
+        existing = set(sess.files)
+        added = [f for f in new_files if f not in existing]
+        sess.files.extend(added)
+        if added:
+            names = ", ".join(Path(f).name for f in added[:3])
+            send_message(chat_id, f"New file(s) detected: {names}", parse_mode=None)
+    sess.last_scan_ts = time.time()
+
+    # Build context prefix — all accumulated files are listed every time
+    ctx_lines = [f"[Assessment: {sess.assessment_type}  |  Question #{qn}]"]
+    if sess.files:
+        ctx_lines.append(
+            "Files available for this assessment (accumulated across all questions): "
+            + ", ".join(Path(f).name for f in sess.files)
+        )
+    ctx_lines.append(
+        "Take a screenshot and answer the question visible on screen. "
+        "Be direct and specific. For multiple-choice, state the correct option clearly."
+    )
+    prompt_text = "\n".join(ctx_lines)
+
+    # Send "working" message
+    resp = send_message(chat_id, f"Looking at question {qn}...", parse_mode=None)
+    msg_id: int | None = None
+    if resp.get("ok"):
+        msg_id = resp["result"]["message_id"]
+
+    def _update(acc: str) -> None:
+        if msg_id:
+            preview = acc[-_TG_MAX:] if len(acc) > _TG_MAX else acc
+            try:
+                edit_message(chat_id, msg_id, preview, parse_mode=None)
+            except Exception:
+                pass
+
+    with _claude_lock:
+        prompt = _build_prompt(chat_id, prompt_text)
+        try:
+            if _STREAM_MODE:
+                final = _ask_claude_stream(prompt, _update, screen=True)
+            else:
+                final = _ask_claude_plain(prompt, screen=True)
+        except subprocess.TimeoutExpired:
+            if msg_id:
+                try:
+                    edit_message(
+                        chat_id, msg_id,
+                        f"Sorry, that took too long ({_TIMEOUT}s). Try tapping Answer Question again.",
+                        parse_mode=None,
+                    )
+                except Exception:
+                    pass
+            _show_in_session_buttons(chat_id, sess)
+            return
+        except Exception as exc:
+            log.exception("Assessment Claude call failed")
+            send_message(chat_id, f"Error: {exc}", parse_mode=None)
+            _show_in_session_buttons(chat_id, sess)
+            return
+        _record_turn(chat_id, prompt_text, final)
+
+    if msg_id and len(final) <= _TG_MAX:
+        try:
+            edit_message(chat_id, msg_id, final, parse_mode=None)
+        except Exception:
+            _send_chunks(chat_id, final)
+    else:
+        _send_chunks(chat_id, final)
+
+    _show_in_session_buttons(chat_id, sess)
+
+
+def _handle_done_session(chat_id: int, sess: _Session) -> None:
+    count = sess.question_count
+    sess.stage = _Stage.IDLE
+    sess.assessment_type = ""
+    sess.files = []
+    sess.question_count = 0
+    sess.last_scan_ts = 0.0
+    mid = _send_btn(
+        chat_id,
+        f"Assessment complete! I answered {count} question(s).\n\n"
+        "Tap Start Assessment whenever you're ready for a new one.",
+        [[("Start Assessment", "start_assessment")]],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _show_client_prompt(chat_id: int, sess: _Session) -> None:
+    """Called when a client sends free text — guide them back to buttons."""
+    if sess.stage == _Stage.IDLE:
+        _show_welcome(chat_id, sess)
+    elif sess.stage == _Stage.SELECTING_TYPE:
+        _show_type_picker(chat_id, sess)
+    elif sess.stage == _Stage.AWAITING_FILES:
+        mid = _send_btn(
+            chat_id,
+            "Waiting for you to download files from the assessment page. Tap when ready.",
+            [[("Files Downloaded", "files_done"), ("No Files", "no_files")]],
+        )
+        if mid:
+            sess.msg_id = mid
+    elif sess.stage == _Stage.IN_SESSION:
+        _show_in_session_buttons(chat_id, sess)
+
+
 # ── Claude invocation ─────────────────────────────────────────────────────────
 
 _CLAUDE_TOOLS_SCREEN = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
