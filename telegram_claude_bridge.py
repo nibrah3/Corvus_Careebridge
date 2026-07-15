@@ -190,10 +190,11 @@ _claude_lock = threading.Lock()
 # ── Client session state machine ──────────────────────────────────────────────
 
 class _Stage(Enum):
-    IDLE             = "idle"
-    SELECTING_TYPE   = "selecting_type"
-    AWAITING_FILES   = "awaiting_files"
-    IN_SESSION       = "in_session"
+    IDLE               = "idle"
+    SELECTING_BROWSER  = "selecting_browser"
+    SELECTING_TYPE     = "selecting_type"
+    AWAITING_FILES     = "awaiting_files"
+    IN_SESSION         = "in_session"
 
 
 @dataclass
@@ -205,6 +206,10 @@ class _Session:
     last_scan_ts: float     = 0.0   # epoch of last Downloads scan
     question_count: int     = 0
     msg_id: int | None      = None  # current button-message id
+    username: str           = ""    # Telegram username (for admin notifications)
+    last_prompt: str        = ""    # prompt used for the last answered question
+    last_answer: str        = ""    # Claude's answer to the last question
+    browser_type: str       = ""    # antidetect browser the client selected
 
 
 _sessions: dict[int, _Session] = {}
@@ -634,15 +639,19 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     raw = (result.stdout or "").strip()
-    if result.returncode != 0 and not raw:
+    if not raw:
+        err = (result.stderr or "").strip()
+        log.warning("Claude empty stdout (exit %d); stderr: %.300s", result.returncode, err)
+        return "I didn't get a response — please tap the button to try again."
+    if result.returncode != 0:
         err = (result.stderr or "").strip()
         return f"Error (exit {result.returncode}):\n{err[:600]}" if err else \
-               f"Claude exited with code {result.returncode} (no output)."
+               f"Claude exited with code {result.returncode}."
     try:
         data = json.loads(raw)
-        return (data.get("result") or data.get("text") or raw or "(no output)").strip()
+        return (data.get("result") or data.get("text") or raw).strip()
     except json.JSONDecodeError:
-        return raw or "(Claude returned no output.)"
+        return raw.strip()
 
 
 def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
