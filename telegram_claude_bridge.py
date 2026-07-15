@@ -532,8 +532,18 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
             + ", ".join(Path(f).name for f in sess.files)
         )
     ctx_lines.append(
-        "Take a screenshot and answer the question visible on screen. "
-        "Be direct and specific. For multiple-choice, state the correct option clearly."
+        "Take a screenshot and answer the question visible on screen.\n"
+        "Format your response in TWO clearly separated parts:\n\n"
+        "ANSWER\n"
+        "Give the direct answer. For multiple-choice state the correct option and why, briefly. "
+        "For written answers give the complete response the student should submit.\n\n"
+        "---\n"
+        "KEY NOTES\n"
+        "After the separator, provide concise instruction-aware guidance (3-5 bullets max):\n"
+        "- Any mandatory keywords or exact phrases that must appear in a written answer\n"
+        "- What can be paraphrased vs. what must be kept verbatim\n"
+        "- Why this is correct based on what the visible instructions or examples say\n"
+        "- Any tricky parts or common mistakes to avoid"
     )
     prompt_text = "\n".join(ctx_lines)
 
@@ -576,6 +586,80 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
             _show_in_session_buttons(chat_id, sess)
             return
         _record_turn(chat_id, prompt_text, final)
+        sess.last_prompt = prompt_text
+        sess.last_answer = final
+
+    if msg_id and len(final) <= _TG_MAX:
+        try:
+            edit_message(chat_id, msg_id, final, parse_mode=None)
+        except Exception:
+            _send_chunks(chat_id, final)
+    else:
+        _send_chunks(chat_id, final)
+
+    _show_in_session_buttons(chat_id, sess)
+
+
+def _handle_answer_again(chat_id: int, sess: _Session) -> None:
+    """Re-answer the current question (same question number, fresh screenshot)."""
+    if sess.question_count > 0:
+        sess.question_count -= 1  # will be re-incremented inside _handle_answer_question
+    _handle_answer_question(chat_id, sess)
+
+
+def _handle_more_details(chat_id: int, sess: _Session) -> None:
+    """Ask Claude to elaborate on the last answer without taking a new screenshot."""
+    if not sess.last_answer:
+        send_message(chat_id, "No previous answer to elaborate on — tap Answer Question first.", parse_mode=None)
+        _show_in_session_buttons(chat_id, sess)
+        return
+
+    resp = send_message(chat_id, "Let me expand on that...", parse_mode=None)
+    msg_id: int | None = None
+    if resp.get("ok"):
+        msg_id = resp["result"]["message_id"]
+
+    def _update(acc: str) -> None:
+        if msg_id:
+            preview = acc[-_TG_MAX:] if len(acc) > _TG_MAX else acc
+            try:
+                edit_message(chat_id, msg_id, preview, parse_mode=None)
+            except Exception:
+                pass
+
+    elaboration_prompt = (
+        f"My previous answer was:\n{sess.last_answer}\n\n"
+        "Please expand on this answer with more detail:\n"
+        "- Deeper explanation of why each part is correct\n"
+        "- Any additional examples or evidence from the instructions that support the answer\n"
+        "- Any alternative phrasings that would still be acceptable\n"
+        "- Anything else the student should know to answer this question well"
+    )
+    with _claude_lock:
+        prompt = _build_prompt(chat_id, elaboration_prompt)
+        try:
+            if _STREAM_MODE:
+                final = _ask_claude_stream(prompt, _update, screen=False)
+            else:
+                final = _ask_claude_plain(prompt, screen=False)
+        except subprocess.TimeoutExpired:
+            if msg_id:
+                try:
+                    edit_message(chat_id, msg_id, "Timed out — please try again.", parse_mode=None)
+                except Exception:
+                    pass
+            _show_in_session_buttons(chat_id, sess)
+            return
+        except Exception as exc:
+            log.exception("More details call failed")
+            if msg_id:
+                try:
+                    edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
+                except Exception:
+                    pass
+            _show_in_session_buttons(chat_id, sess)
+            return
+        _record_turn(chat_id, elaboration_prompt, final)
 
     if msg_id and len(final) <= _TG_MAX:
         try:
