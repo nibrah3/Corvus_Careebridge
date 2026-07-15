@@ -679,6 +679,9 @@ def _handle_done_session(chat_id: int, sess: _Session) -> None:
     sess.files = []
     sess.question_count = 0
     sess.last_scan_ts = 0.0
+    sess.last_prompt = ""
+    sess.last_answer = ""
+    sess.browser_type = ""
     mid = _send_btn(
         chat_id,
         f"Assessment complete! I answered {count} question(s).\n\n"
@@ -693,6 +696,8 @@ def _show_client_prompt(chat_id: int, sess: _Session) -> None:
     """Called when a client sends free text — guide them back to buttons."""
     if sess.stage == _Stage.IDLE:
         _show_welcome(chat_id, sess)
+    elif sess.stage == _Stage.SELECTING_BROWSER:
+        _show_browser_picker(chat_id, sess)
     elif sess.stage == _Stage.SELECTING_TYPE:
         _show_type_picker(chat_id, sess)
     elif sess.stage == _Stage.AWAITING_FILES:
@@ -1323,8 +1328,23 @@ def _handle_callback(cq: dict) -> None:
             sess = _Session(chat_id=chat_id)
             _sessions[chat_id] = sess
 
+    # Capture username from callback so it's available for admin notifications
+    if not sess.username:
+        sess.username = cq.get("from", {}).get("username", "")
+
     if data == "start_assessment":
-        _show_type_picker(chat_id, sess)
+        _show_browser_picker(chat_id, sess)
+
+    elif data == "test_screen":
+        threading.Thread(
+            target=_handle_test_screen,
+            args=(chat_id, sess),
+            daemon=True,
+        ).start()
+
+    elif data in ("browser_multilogin", "browser_gologin", "browser_adspower",
+                  "browser_dolphin", "browser_other"):
+        _handle_browser_selected(chat_id, sess, data)
 
     elif data in ("type_mc", "type_written", "type_media", "type_mixed"):
         _handle_type_selected(chat_id, sess, data)
@@ -1342,6 +1362,44 @@ def _handle_callback(cq: dict) -> None:
                 args=(chat_id, sess),
                 daemon=True,
             ).start()
+        else:
+            _show_welcome(chat_id, sess)
+
+    elif data == "answer_again":
+        if sess.stage == _Stage.IN_SESSION:
+            threading.Thread(
+                target=_handle_answer_again,
+                args=(chat_id, sess),
+                daemon=True,
+            ).start()
+        else:
+            _show_welcome(chat_id, sess)
+
+    elif data == "more_details":
+        if sess.stage == _Stage.IN_SESSION:
+            threading.Thread(
+                target=_handle_more_details,
+                args=(chat_id, sess),
+                daemon=True,
+            ).start()
+        else:
+            _show_welcome(chat_id, sess)
+
+    elif data == "go_back":
+        if sess.stage == _Stage.IN_SESSION:
+            # Go back to the file step so the client can re-scan or adjust before next question
+            sess.stage = _Stage.AWAITING_FILES
+            mid = _send_btn(
+                chat_id,
+                "Going back. Download any remaining files or continue without new files.",
+                [[("Files Downloaded", "files_done"), ("No Files", "no_files")]],
+            )
+            if mid:
+                sess.msg_id = mid
+        elif sess.stage == _Stage.AWAITING_FILES:
+            _show_type_picker(chat_id, sess)
+        elif sess.stage == _Stage.SELECTING_TYPE:
+            _show_welcome(chat_id, sess)
         else:
             _show_welcome(chat_id, sess)
 
