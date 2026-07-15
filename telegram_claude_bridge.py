@@ -328,11 +328,110 @@ def _show_welcome(chat_id: int, sess: _Session) -> None:
     mid = _send_btn(
         chat_id,
         "Hi! I'm Corvus, your AI assessment assistant.\n\n"
-        "When you're on the assessment site and ready to start, tap the button below.",
-        [[("Start Assessment", "start_assessment")]],
+        "When you're on the assessment site and ready to start, tap Start Assessment.\n"
+        "Not sure I can see your screen? Tap Test Screen View first.",
+        [
+            [("Start Assessment", "start_assessment")],
+            [("Test Screen View", "test_screen")],
+        ],
     )
     if mid:
         sess.msg_id = mid
+
+
+def _show_browser_picker(chat_id: int, sess: _Session) -> None:
+    sess.stage = _Stage.SELECTING_BROWSER
+    mid = _send_btn(
+        chat_id,
+        "Which antidetect browser are you using for this assessment?\n"
+        "This lets us set up the correct browser profile for you.",
+        [
+            [("Multilogin", "browser_multilogin"), ("GoLogin", "browser_gologin")],
+            [("AdsPower", "browser_adspower"), ("Dolphin Anty", "browser_dolphin")],
+            [("Other / Not Sure", "browser_other")],
+        ],
+    )
+    if mid:
+        sess.msg_id = mid
+
+
+def _handle_browser_selected(chat_id: int, sess: _Session, data: str) -> None:
+    browser_names = {
+        "browser_multilogin": "Multilogin",
+        "browser_gologin":    "GoLogin",
+        "browser_adspower":   "AdsPower",
+        "browser_dolphin":    "Dolphin Anty",
+        "browser_other":      "Other / Not specified",
+    }
+    sess.browser_type = browser_names.get(data, "Unknown")
+    user_str = f"@{sess.username}" if sess.username else str(chat_id)
+    for admin_id in _ADMINS:
+        try:
+            send_message(
+                admin_id,
+                f"Browser setup needed:\nClient: {user_str}  (chat_id: {chat_id})\n"
+                f"Browser: {sess.browser_type}\nPlease set up the correct browser profile.",
+                parse_mode=None,
+            )
+        except Exception:
+            pass
+    _show_type_picker(chat_id, sess)
+
+
+def _handle_test_screen(chat_id: int, sess: _Session) -> None:
+    """Screenshot + plain description — lets client verify Corvus can see the screen."""
+    resp = send_message(chat_id, "Let me take a look at your screen...", parse_mode=None)
+    msg_id: int | None = None
+    if resp.get("ok"):
+        msg_id = resp["result"]["message_id"]
+
+    def _update(acc: str) -> None:
+        if msg_id:
+            preview = acc[-_TG_MAX:] if len(acc) > _TG_MAX else acc
+            try:
+                edit_message(chat_id, msg_id, preview, parse_mode=None)
+            except Exception:
+                pass
+
+    prompt_text = (
+        "Take a screenshot and describe what you can see on the screen right now. "
+        "Mention the browser, the website or page name, any visible text, forms, or images. "
+        "This is a screen verification check — just describe what's there clearly."
+    )
+    with _claude_lock:
+        prompt = _build_prompt(chat_id, prompt_text)
+        try:
+            if _STREAM_MODE:
+                final = _ask_claude_stream(prompt, _update, screen=True)
+            else:
+                final = _ask_claude_plain(prompt, screen=True)
+        except subprocess.TimeoutExpired:
+            if msg_id:
+                try:
+                    edit_message(chat_id, msg_id, "Timed out — try again.", parse_mode=None)
+                except Exception:
+                    pass
+            _show_welcome(chat_id, sess)
+            return
+        except Exception as exc:
+            log.exception("Screen test failed")
+            if msg_id:
+                try:
+                    edit_message(chat_id, msg_id, f"Screen test failed: {exc}", parse_mode=None)
+                except Exception:
+                    pass
+            _show_welcome(chat_id, sess)
+            return
+
+    if msg_id and len(final) <= _TG_MAX:
+        try:
+            edit_message(chat_id, msg_id, final, parse_mode=None)
+        except Exception:
+            _send_chunks(chat_id, final)
+    else:
+        _send_chunks(chat_id, final)
+
+    _show_welcome(chat_id, sess)
 
 
 def _show_type_picker(chat_id: int, sess: _Session) -> None:
@@ -399,8 +498,12 @@ def _handle_files_step(chat_id: int, sess: _Session, has_files: bool) -> None:
 def _show_in_session_buttons(chat_id: int, sess: _Session) -> None:
     mid = _send_btn(
         chat_id,
-        "Move to the next question when ready, or tap Done to finish.",
-        [[("Answer Next Question", "answer_q")], [("Done", "done_session")]],
+        "Move to the next question when ready, or choose an option below.",
+        [
+            [("Answer Next Question", "answer_q"), ("Answer Again", "answer_again")],
+            [("More Details", "more_details"), ("Back", "go_back")],
+            [("Done", "done_session")],
+        ],
     )
     if mid:
         sess.msg_id = mid
@@ -786,7 +889,11 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
     if _did_timeout.is_set():
         raise subprocess.TimeoutExpired("claude", _TIMEOUT)
 
-    return final_result or accumulated.strip() or "(Claude returned no output.)"
+    result_text = final_result or accumulated.strip()
+    if not result_text:
+        log.warning("Claude stream returned no output (did_timeout=%s)", _did_timeout.is_set())
+        return "I didn't get a response — please tap the button to try again."
+    return result_text
 
 
 # ── Message handlers ──────────────────────────────────────────────────────────
