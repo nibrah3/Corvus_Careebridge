@@ -1100,6 +1100,22 @@ def _handle(msg: dict) -> None:
 
     # ── Non-admin (client) messages ────────────────────────────────────────────
     if chat_id not in _ADMINS or chat_id in _test_client_ids:
+        # Admin test-mode escape: /testclient and /stopclienttest always work,
+        # even when the admin is currently routed through the client path.
+        if chat_id in _ADMINS:
+            _lower_chk = text.lower()
+            if _lower_chk == "/stopclienttest":
+                _test_client_ids.discard(chat_id)
+                with _sessions_lock:
+                    _sessions.pop(chat_id, None)
+                send_message(chat_id, "Test-client mode OFF. Back to admin mode.", parse_mode=None)
+                return
+            if _lower_chk == "/testclient":
+                _test_client_ids.add(chat_id)
+                with _sessions_lock:
+                    _sessions[chat_id] = _Session(chat_id=chat_id)
+                send_message(chat_id, "Test-client mode ON. You are now in the client flow. Send any text to begin.", parse_mode=None)
+                return
         log.info("client chat=%s  %r", chat_id, text[:60])
 
         with _sessions_lock:
