@@ -1107,6 +1107,8 @@ def _handle(msg: dict) -> None:
             if sess is None:
                 sess = _Session(chat_id=chat_id)
                 _sessions[chat_id] = sess
+            if username and not sess.username:
+                sess.username = username
 
         # Notify admin on first contact
         with _db_lock:
