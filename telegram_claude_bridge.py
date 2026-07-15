@@ -190,18 +190,17 @@ _claude_lock = threading.Lock()
 # ── Client session state machine ──────────────────────────────────────────────
 
 class _Stage(Enum):
-    IDLE               = "idle"
-    SELECTING_BROWSER  = "selecting_browser"
-    SELECTING_TYPE     = "selecting_type"
-    AWAITING_FILES     = "awaiting_files"
-    IN_SESSION         = "in_session"
+    IDLE                 = "idle"
+    SELECTING_BROWSER    = "selecting_browser"
+    AWAITING_ADMIN_READY = "awaiting_admin_ready"
+    AWAITING_FILES       = "awaiting_files"
+    IN_SESSION           = "in_session"
 
 
 @dataclass
 class _Session:
     chat_id: int
     stage: _Stage           = _Stage.IDLE
-    assessment_type: str    = ""
     files: list[str]        = field(default_factory=list)
     last_scan_ts: float     = 0.0   # epoch of last Downloads scan
     question_count: int     = 0
@@ -343,12 +342,10 @@ def _show_browser_picker(chat_id: int, sess: _Session) -> None:
     sess.stage = _Stage.SELECTING_BROWSER
     mid = _send_btn(
         chat_id,
-        "Which antidetect browser are you using for this assessment?\n"
-        "This lets us set up the correct browser profile for you.",
+        "Which antidetect browser are you using for this assessment?",
         [
             [("Multilogin", "browser_multilogin"), ("GoLogin", "browser_gologin")],
-            [("AdsPower", "browser_adspower"), ("Dolphin Anty", "browser_dolphin")],
-            [("Other / Not Sure", "browser_other")],
+            [("AdsPower", "browser_adspower"), ("IXBrowser", "browser_ixbrowser")],
         ],
     )
     if mid:
@@ -360,22 +357,64 @@ def _handle_browser_selected(chat_id: int, sess: _Session, data: str) -> None:
         "browser_multilogin": "Multilogin",
         "browser_gologin":    "GoLogin",
         "browser_adspower":   "AdsPower",
-        "browser_dolphin":    "Dolphin Anty",
-        "browser_other":      "Other / Not specified",
+        "browser_ixbrowser":  "IXBrowser",
     }
     sess.browser_type = browser_names.get(data, "Unknown")
+    sess.stage = _Stage.AWAITING_ADMIN_READY
+
     user_str = f"@{sess.username}" if sess.username else str(chat_id)
     for admin_id in _ADMINS:
         try:
             send_message(
                 admin_id,
-                f"Browser setup needed:\nClient: {user_str}  (chat_id: {chat_id})\n"
-                f"Browser: {sess.browser_type}\nPlease set up the correct browser profile.",
+                f"Client ready for setup:\n"
+                f"  User: {user_str}  (chat_id: {chat_id})\n"
+                f"  Browser: {sess.browser_type}\n\n"
+                f"Set up the browser profile, then send:\n"
+                f"  /connect {chat_id} <UltraViewer_ID>",
                 parse_mode=None,
             )
         except Exception:
             pass
-    _show_type_picker(chat_id, sess)
+
+    send_message(
+        chat_id,
+        "Your session is being set up — hang tight, you'll be notified when it's ready.",
+        parse_mode=None,
+    )
+
+
+def _handle_connect(admin_chat_id: int, client_id: int, uv_id: str) -> None:
+    """Admin sends /connect <client_chat_id> <UltraViewer_ID> after setup is ready."""
+    with _sessions_lock:
+        sess = _sessions.get(client_id)
+
+    if sess is None:
+        send_message(admin_chat_id, f"No active session for chat_id {client_id}.", parse_mode=None)
+        return
+    if sess.stage != _Stage.AWAITING_ADMIN_READY:
+        send_message(
+            admin_chat_id,
+            f"Client {client_id} is not waiting for setup (stage: {sess.stage.value}).",
+            parse_mode=None,
+        )
+        return
+
+    sess.stage = _Stage.AWAITING_FILES
+    sess.last_scan_ts = time.time()
+
+    mid = _send_btn(
+        client_id,
+        f"You're in. Connect to UltraViewer using ID: {uv_id}\n\n"
+        "Once connected, start by downloading your assessment guidelines and any general "
+        "materials provided — PDFs, instruction sheets, anything on the download page. "
+        "When your downloads are done, tap Files Ready.",
+        [[("Files Ready", "files_done"), ("No Files", "no_files")]],
+    )
+    if mid:
+        sess.msg_id = mid
+
+    send_message(admin_chat_id, f"Client {client_id} notified. Session is live.", parse_mode=None)
 
 
 def _handle_test_screen(chat_id: int, sess: _Session) -> None:
@@ -434,53 +473,17 @@ def _handle_test_screen(chat_id: int, sess: _Session) -> None:
     _show_welcome(chat_id, sess)
 
 
-def _show_type_picker(chat_id: int, sess: _Session) -> None:
-    sess.stage = _Stage.SELECTING_TYPE
-    mid = _send_btn(
-        chat_id,
-        "What type of assessment is this?",
-        [
-            [("Multiple Choice", "type_mc"), ("Written / Essay", "type_written")],
-            [("Video / Audio Based", "type_media"), ("Mixed / Other", "type_mixed")],
-        ],
-    )
-    if mid:
-        sess.msg_id = mid
-
-
-def _handle_type_selected(chat_id: int, sess: _Session, data: str) -> None:
-    types = {
-        "type_mc":      "Multiple Choice",
-        "type_written": "Written / Essay",
-        "type_media":   "Video / Audio Based",
-        "type_mixed":   "Mixed / Other",
-    }
-    sess.assessment_type = types.get(data, "General")
-    sess.stage = _Stage.AWAITING_FILES
-    sess.last_scan_ts = time.time()
-    mid = _send_btn(
-        chat_id,
-        f"Got it — {sess.assessment_type} assessment.\n\n"
-        "Please download all files from the assessment page (PDFs, audio clips, videos, instruction sheets).\n"
-        "Tap when done — or No Files if there's nothing to download.",
-        [[("Files Downloaded", "files_done"), ("No Files", "no_files")]],
-    )
-    if mid:
-        sess.msg_id = mid
-
-
 def _handle_files_step(chat_id: int, sess: _Session, has_files: bool) -> None:
     if has_files:
         new_files = _find_recent_downloads(since=sess.last_scan_ts)
         if new_files:
-            # Accumulate — don't overwrite; earlier files stay in the list
             existing = set(sess.files)
             sess.files.extend(f for f in new_files if f not in existing)
             names = ", ".join(Path(f).name for f in new_files[:5])
             extra = f" (+{len(new_files)-5} more)" if len(new_files) > 5 else ""
-            file_info = f"Found {len(new_files)} new file(s): {names}{extra}"
+            file_info = f"Got it — picked up {len(new_files)} file(s): {names}{extra}"
         else:
-            file_info = "No new files detected in Downloads — I'll rely on the screen."
+            file_info = "No new files found in Downloads — I'll work from the screen."
         sess.last_scan_ts = time.time()
     else:
         file_info = "No files — I'll answer from what's on screen."
@@ -488,8 +491,12 @@ def _handle_files_step(chat_id: int, sess: _Session, has_files: bool) -> None:
     sess.stage = _Stage.IN_SESSION
     mid = _send_btn(
         chat_id,
-        f"{file_info}\n\nNavigate to the first question, then tap Answer Question.",
-        [[("Answer Question", "answer_q")], [("Done", "done_session")]],
+        f"{file_info}\n\n"
+        "Navigate to your first question. If the question includes any files — "
+        "audio clips or video — download those now as well. "
+        "Then scroll slowly through the page from top to bottom, "
+        "and tap I'm Ready when you're on your question.",
+        [[("I'm Ready", "answer_q")], [("End Session", "done_session")]],
     )
     if mid:
         sess.msg_id = mid
@@ -498,11 +505,11 @@ def _handle_files_step(chat_id: int, sess: _Session, has_files: bool) -> None:
 def _show_in_session_buttons(chat_id: int, sess: _Session) -> None:
     mid = _send_btn(
         chat_id,
-        "Move to the next question when ready, or choose an option below.",
+        "For your next question: navigate to it, download any question files if there are any, "
+        "scroll slowly through the page, then tap I'm Ready.",
         [
-            [("Answer Next Question", "answer_q"), ("Answer Again", "answer_again")],
-            [("More Details", "more_details"), ("Back", "go_back")],
-            [("Done", "done_session")],
+            [("I'm Ready", "answer_q"), ("More Details", "more_details")],
+            [("End Session", "done_session")],
         ],
     )
     if mid:
@@ -513,7 +520,7 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
     sess.question_count += 1
     qn = sess.question_count
 
-    # Scan for files added since last scan (e.g., audio for new question)
+    # Scan for files added since last scan (question-specific audio/video/docs)
     new_files = _find_recent_downloads(since=sess.last_scan_ts)
     if new_files:
         existing = set(sess.files)
@@ -521,34 +528,49 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
         sess.files.extend(added)
         if added:
             names = ", ".join(Path(f).name for f in added[:3])
-            send_message(chat_id, f"New file(s) detected: {names}", parse_mode=None)
+            send_message(chat_id, f"New file(s) picked up: {names}", parse_mode=None)
     sess.last_scan_ts = time.time()
 
-    # Build context prefix — all accumulated files are listed every time
-    ctx_lines = [f"[Assessment: {sess.assessment_type}  |  Question #{qn}]"]
+    # Tell the client to scroll — natural language, no mention of capture
+    send_message(
+        chat_id,
+        "Got it — scroll through the page now, nice and steady.",
+        parse_mode=None,
+    )
+
+    # Build context: instruct Claude to take periodic screenshots during the scroll window
+    ctx_lines = [f"[Question #{qn}]"]
     if sess.files:
         ctx_lines.append(
-            "Files available for this assessment (accumulated across all questions): "
+            "Assessment files collected this session (guidelines + any question files): "
             + ", ".join(Path(f).name for f in sess.files)
         )
     ctx_lines.append(
-        "Take a screenshot and answer the question visible on screen.\n"
+        "The client is currently scrolling through the assessment page. "
+        "Capture the full page content by taking 7 screenshots spaced 2 seconds apart:\n"
+        "  1. Call mcp__capture__screenshot and record the path\n"
+        "  2. Call Bash: python -c \"import time; time.sleep(2)\"\n"
+        "  Repeat steps 1 and 2 seven times total (7 screenshots, ~14 seconds of scroll).\n"
+        "Then call mcp__gemini__analyse_image on each screenshot path in sequence.\n"
+        "Combine everything you see across all frames plus any listed assessment files "
+        "as a single unified context.\n\n"
+        "Answer the question visible in the screenshots.\n"
         "Format your response in TWO clearly separated parts:\n\n"
         "ANSWER\n"
         "Give the direct answer. For multiple-choice state the correct option and why, briefly. "
         "For written answers give the complete response the student should submit.\n\n"
         "---\n"
         "KEY NOTES\n"
-        "After the separator, provide concise instruction-aware guidance (3-5 bullets max):\n"
-        "- Any mandatory keywords or exact phrases that must appear in a written answer\n"
+        "3-5 bullets max:\n"
+        "- Any mandatory keywords or exact phrases that must appear\n"
         "- What can be paraphrased vs. what must be kept verbatim\n"
-        "- Why this is correct based on what the visible instructions or examples say\n"
+        "- Why this is correct based on visible instructions or examples\n"
         "- Any tricky parts or common mistakes to avoid"
     )
     prompt_text = "\n".join(ctx_lines)
 
     # Send "working" message
-    resp = send_message(chat_id, f"Looking at question {qn}...", parse_mode=None)
+    resp = send_message(chat_id, f"Reading question {qn}...", parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
         msg_id = resp["result"]["message_id"]
@@ -573,7 +595,7 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
                 try:
                     edit_message(
                         chat_id, msg_id,
-                        f"Sorry, that took too long ({_TIMEOUT}s). Try tapping Answer Question again.",
+                        f"Sorry, that took too long ({_TIMEOUT}s). Tap I'm Ready to try again.",
                         parse_mode=None,
                     )
                 except Exception:
@@ -600,17 +622,10 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
     _show_in_session_buttons(chat_id, sess)
 
 
-def _handle_answer_again(chat_id: int, sess: _Session) -> None:
-    """Re-answer the current question (same question number, fresh screenshot)."""
-    if sess.question_count > 0:
-        sess.question_count -= 1  # will be re-incremented inside _handle_answer_question
-    _handle_answer_question(chat_id, sess)
-
-
 def _handle_more_details(chat_id: int, sess: _Session) -> None:
     """Ask Claude to elaborate on the last answer without taking a new screenshot."""
     if not sess.last_answer:
-        send_message(chat_id, "No previous answer to elaborate on — tap Answer Question first.", parse_mode=None)
+        send_message(chat_id, "No previous answer to elaborate on — tap I'm Ready first.", parse_mode=None)
         _show_in_session_buttons(chat_id, sess)
         return
 
@@ -675,7 +690,6 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
 def _handle_done_session(chat_id: int, sess: _Session) -> None:
     count = sess.question_count
     sess.stage = _Stage.IDLE
-    sess.assessment_type = ""
     sess.files = []
     sess.question_count = 0
     sess.last_scan_ts = 0.0
@@ -684,8 +698,8 @@ def _handle_done_session(chat_id: int, sess: _Session) -> None:
     sess.browser_type = ""
     mid = _send_btn(
         chat_id,
-        f"Assessment complete! I answered {count} question(s).\n\n"
-        "Tap Start Assessment whenever you're ready for a new one.",
+        f"Session complete — {count} question(s) answered.\n\n"
+        "Tap Start Assessment whenever you're ready for another.",
         [[("Start Assessment", "start_assessment")]],
     )
     if mid:
@@ -698,13 +712,17 @@ def _show_client_prompt(chat_id: int, sess: _Session) -> None:
         _show_welcome(chat_id, sess)
     elif sess.stage == _Stage.SELECTING_BROWSER:
         _show_browser_picker(chat_id, sess)
-    elif sess.stage == _Stage.SELECTING_TYPE:
-        _show_type_picker(chat_id, sess)
+    elif sess.stage == _Stage.AWAITING_ADMIN_READY:
+        send_message(
+            chat_id,
+            "Your session is still being set up — hang tight, you'll be notified when it's ready.",
+            parse_mode=None,
+        )
     elif sess.stage == _Stage.AWAITING_FILES:
         mid = _send_btn(
             chat_id,
-            "Waiting for you to download files from the assessment page. Tap when ready.",
-            [[("Files Downloaded", "files_done"), ("No Files", "no_files")]],
+            "Download your assessment guidelines and any general materials, then tap Files Ready.",
+            [[("Files Ready", "files_done"), ("No Files", "no_files")]],
         )
         if mid:
             sess.msg_id = mid
@@ -1100,8 +1118,8 @@ def _handle(msg: dict) -> None:
 
     # ── Non-admin (client) messages ────────────────────────────────────────────
     if chat_id not in _ADMINS or chat_id in _test_client_ids:
-        # Admin test-mode escape: /testclient and /stopclienttest always work,
-        # even when the admin is currently routed through the client path.
+        # Admin test-mode escapes: these commands always route to admin handler
+        # even while the admin is in test-client mode.
         if chat_id in _ADMINS:
             _lower_chk = text.lower()
             if _lower_chk == "/stopclienttest":
@@ -1116,40 +1134,65 @@ def _handle(msg: dict) -> None:
                     _sessions[chat_id] = _Session(chat_id=chat_id)
                 send_message(chat_id, "Test-client mode ON. You are now in the client flow. Send any text to begin.", parse_mode=None)
                 return
-        log.info("client chat=%s  %r", chat_id, text[:60])
+            if _lower_chk.startswith("/connect "):
+                # Fall through to admin handler so /connect works in test-client mode
+                pass
+            else:
+                log.info("client chat=%s  %r", chat_id, text[:60])
 
-        with _sessions_lock:
-            sess = _sessions.get(chat_id)
-            if sess is None:
-                sess = _Session(chat_id=chat_id)
-                _sessions[chat_id] = sess
-            if username and not sess.username:
-                sess.username = username
+                with _sessions_lock:
+                    sess = _sessions.get(chat_id)
+                    if sess is None:
+                        sess = _Session(chat_id=chat_id)
+                        _sessions[chat_id] = sess
+                    if username and not sess.username:
+                        sess.username = username
 
-        # Notify admin on first contact
-        with _db_lock:
-            is_new = _db.execute(
-                "SELECT 1 FROM turns WHERE chat_id=? LIMIT 1", (chat_id,)
-            ).fetchone() is None
-        if is_new:
-            user_str = f"@{username}" if username else str(chat_id)
-            for admin_id in _ADMINS:
-                try:
-                    send_message(
-                        admin_id,
-                        f"New client: {user_str}  (chat_id: {chat_id})\nFirst message: {text[:200]}",
-                        parse_mode=None,
-                    )
-                except Exception:
-                    pass
+                _show_client_prompt(chat_id, sess)
+                return
+        else:
+            log.info("client chat=%s  %r", chat_id, text[:60])
 
-        # Any free-text from a client is nudged back to buttons
-        _show_client_prompt(chat_id, sess)
-        return
+            with _sessions_lock:
+                sess = _sessions.get(chat_id)
+                if sess is None:
+                    sess = _Session(chat_id=chat_id)
+                    _sessions[chat_id] = sess
+                if username and not sess.username:
+                    sess.username = username
+
+            # Notify admin on first contact
+            with _db_lock:
+                is_new = _db.execute(
+                    "SELECT 1 FROM turns WHERE chat_id=? LIMIT 1", (chat_id,)
+                ).fetchone() is None
+            if is_new:
+                user_str = f"@{username}" if username else str(chat_id)
+                for admin_id in _ADMINS:
+                    try:
+                        send_message(
+                            admin_id,
+                            f"New client: {user_str}  (chat_id: {chat_id})\nFirst message: {text[:200]}",
+                            parse_mode=None,
+                        )
+                    except Exception:
+                        pass
+
+            _show_client_prompt(chat_id, sess)
+            return
 
     log.info("chat=%s  %r", chat_id, text[:80])
 
     lower = text.lower()
+
+    # ── Admin: /connect <client_chat_id> <UltraViewer_ID> ────────────────────
+    if lower.startswith("/connect "):
+        parts = text.split()
+        if len(parts) >= 3 and parts[1].isdigit():
+            _handle_connect(chat_id, int(parts[1]), parts[2])
+        else:
+            send_message(chat_id, "Usage: /connect <client_chat_id> <UltraViewer_ID>", parse_mode=None)
+        return
 
     # ── Admin shortcut: start <chat_id> [platform] ───────────────────────────
     if lower.startswith("start "):
@@ -1290,11 +1333,12 @@ def _handle(msg: dict) -> None:
         send_message(
             chat_id,
             "Corvus Admin Commands\n\n"
-            "Session:\n"
-            "  start <chat_id>            — start client session\n"
-            "  start <chat_id> <platform> — start on named platform\n"
-            "  end session <session_id>   — end a session\n"
-            "  pool / sessions            — show active sessions\n\n"
+            "Client session:\n"
+            "  /connect <chat_id> <UV_ID>  — release client to UltraViewer session\n"
+            "  start <chat_id>             — start client session via master\n"
+            "  start <chat_id> <platform>  — start on named platform\n"
+            "  end session <session_id>    — end a session\n"
+            "  pool / sessions             — show active sessions\n\n"
             "Conversation:\n"
             "  /clearhistory  — clear chat turns (memories kept)\n"
             "  /memory        — list stored memories\n"
@@ -1360,12 +1404,9 @@ def _handle_callback(cq: dict) -> None:
             daemon=True,
         ).start()
 
-    elif data in ("browser_multilogin", "browser_gologin", "browser_adspower",
-                  "browser_dolphin", "browser_other"):
+    elif data in ("browser_multilogin", "browser_gologin",
+                  "browser_adspower", "browser_ixbrowser"):
         _handle_browser_selected(chat_id, sess, data)
-
-    elif data in ("type_mc", "type_written", "type_media", "type_mixed"):
-        _handle_type_selected(chat_id, sess, data)
 
     elif data == "files_done":
         _handle_files_step(chat_id, sess, has_files=True)
@@ -1383,16 +1424,6 @@ def _handle_callback(cq: dict) -> None:
         else:
             _show_welcome(chat_id, sess)
 
-    elif data == "answer_again":
-        if sess.stage == _Stage.IN_SESSION:
-            threading.Thread(
-                target=_handle_answer_again,
-                args=(chat_id, sess),
-                daemon=True,
-            ).start()
-        else:
-            _show_welcome(chat_id, sess)
-
     elif data == "more_details":
         if sess.stage == _Stage.IN_SESSION:
             threading.Thread(
@@ -1400,24 +1431,6 @@ def _handle_callback(cq: dict) -> None:
                 args=(chat_id, sess),
                 daemon=True,
             ).start()
-        else:
-            _show_welcome(chat_id, sess)
-
-    elif data == "go_back":
-        if sess.stage == _Stage.IN_SESSION:
-            # Go back to the file step so the client can re-scan or adjust before next question
-            sess.stage = _Stage.AWAITING_FILES
-            mid = _send_btn(
-                chat_id,
-                "Going back. Download any remaining files or continue without new files.",
-                [[("Files Downloaded", "files_done"), ("No Files", "no_files")]],
-            )
-            if mid:
-                sess.msg_id = mid
-        elif sess.stage == _Stage.AWAITING_FILES:
-            _show_type_picker(chat_id, sess)
-        elif sess.stage == _Stage.SELECTING_TYPE:
-            _show_welcome(chat_id, sess)
         else:
             _show_welcome(chat_id, sess)
 
