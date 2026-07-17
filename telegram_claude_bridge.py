@@ -344,8 +344,8 @@ def _show_browser_picker(chat_id: int, sess: _Session) -> None:
         chat_id,
         "Which antidetect browser are you using for this assessment?",
         [
-            [("Multilogin", "browser_multilogin"), ("GoLogin", "browser_gologin")],
-            [("AdsPower", "browser_adspower"), ("IXBrowser", "browser_ixbrowser")],
+            [("MoreLogin", "browser_morelogin"), ("GoLogin", "browser_gologin")],
+            [("IXBrowser", "browser_ixbrowser"), ("AdsPower", "browser_adspower")],
         ],
     )
     if mid:
@@ -354,7 +354,7 @@ def _show_browser_picker(chat_id: int, sess: _Session) -> None:
 
 def _handle_browser_selected(chat_id: int, sess: _Session, data: str) -> None:
     browser_names = {
-        "browser_multilogin": "Multilogin",
+        "browser_morelogin":  "MoreLogin",
         "browser_gologin":    "GoLogin",
         "browser_adspower":   "AdsPower",
         "browser_ixbrowser":  "IXBrowser",
