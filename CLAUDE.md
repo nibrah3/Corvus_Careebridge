@@ -19,9 +19,6 @@ It is NOT a job-finding or school-enrollment service.
 Intelligence needed
        │
        ▼
-Claude Code CLI on VPS?  ──logged in?──► YES → claude --print -p prompt.md (VPS cron / nohup)
-       │ NO (not logged in)
-       ▼
 In active Claude Code session? ──────────► YES → in-session batch analysis (skill pattern)
        │ NO
        ▼
