@@ -186,4 +186,6 @@ if __name__ == "__main__":
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8703
     print(f"[capture_server] Starting on port {port}")
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    # Loopback only — the worker reaches this server via localhost, which spans
+    # all local Windows sessions. No reason to expose screen-capture to the LAN.
+    app.run(host="127.0.0.1", port=port, threaded=True)

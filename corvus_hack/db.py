@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "corvus_sessions.db"
@@ -18,11 +19,35 @@ def _conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # Wait up to 5s for a writer lock instead of failing immediately with
+    # "database is locked" when several session daemons write concurrently.
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
+@contextmanager
+def _db():
+    """
+    Connection context manager that commits on success, rolls back on error,
+    and ALWAYS closes the connection.
+
+    Note: sqlite3's own `with conn:` only manages the transaction — it never
+    closes the connection, so the previous `with _conn() as conn:` pattern
+    leaked a file handle on every call. This wrapper fixes that leak.
+    """
+    conn = _conn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
-    with _conn() as conn:
+    with _db() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS accounts (
                 account_name TEXT PRIMARY KEY,
@@ -64,19 +89,32 @@ def init_db() -> None:
 
 
 def allocate_account(session_id: str, user_id: int, platform: str) -> str | None:
-    """Claim an available account. Returns account_name or None if all busy."""
-    with _conn() as conn:
+    """Claim an available account. Returns account_name or None if all busy.
+
+    The claim is a single atomic UPDATE guarded by status='available', so two
+    concurrent callers can never grab the same account: the second UPDATE finds
+    no matching row (rowcount 0) because the first already flipped it to
+    'active'. The previous SELECT-then-UPDATE version had that race.
+    """
+    now = time.time()
+    with _db() as conn:
+        cur = conn.execute(
+            """UPDATE accounts
+               SET status='active', user_id=?, session_id=?, last_seen=?
+               WHERE account_name = (
+                   SELECT account_name FROM accounts
+                   WHERE status='available' ORDER BY account_name LIMIT 1
+               )""",
+            (user_id, session_id, now),
+        )
+        if cur.rowcount == 0:
+            return None
         row = conn.execute(
-            "SELECT account_name FROM accounts WHERE status='available' LIMIT 1"
+            "SELECT account_name FROM accounts WHERE session_id=?", (session_id,)
         ).fetchone()
         if not row:
             return None
         name = row["account_name"]
-        now = time.time()
-        conn.execute(
-            "UPDATE accounts SET status='active', user_id=?, session_id=?, last_seen=? WHERE account_name=?",
-            (user_id, session_id, now, name),
-        )
         conn.execute(
             """INSERT OR REPLACE INTO sessions
                (session_id, user_id, account_name, status, platform, session_start)
@@ -87,7 +125,7 @@ def allocate_account(session_id: str, user_id: int, platform: str) -> str | None
 
 
 def release_account(session_id: str) -> None:
-    with _conn() as conn:
+    with _db() as conn:
         conn.execute(
             "UPDATE accounts SET status='available', user_id=NULL, session_id=NULL WHERE session_id=?",
             (session_id,),
@@ -99,7 +137,7 @@ def release_account(session_id: str) -> None:
 
 
 def get_session(session_id: str) -> dict | None:
-    with _conn() as conn:
+    with _db() as conn:
         row = conn.execute(
             "SELECT * FROM sessions WHERE session_id=?", (session_id,)
         ).fetchone()
@@ -108,7 +146,7 @@ def get_session(session_id: str) -> dict | None:
 
 def get_client_session(chat_id: int) -> dict | None:
     """Active session for a client chat_id."""
-    with _conn() as conn:
+    with _db() as conn:
         row = conn.execute(
             "SELECT * FROM sessions WHERE user_id=? AND status='active'", (chat_id,)
         ).fetchone()
@@ -116,7 +154,7 @@ def get_client_session(chat_id: int) -> dict | None:
 
 
 def register_client(chat_id: int, username: str) -> None:
-    with _conn() as conn:
+    with _db() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO clients (chat_id, username) VALUES (?,?)",
             (chat_id, username),
@@ -124,7 +162,7 @@ def register_client(chat_id: int, username: str) -> None:
 
 
 def is_registered_client(chat_id: int) -> bool:
-    with _conn() as conn:
+    with _db() as conn:
         row = conn.execute(
             "SELECT 1 FROM clients WHERE chat_id=?", (chat_id,)
         ).fetchone()
@@ -132,7 +170,7 @@ def is_registered_client(chat_id: int) -> bool:
 
 
 def client_sessions_done(chat_id: int) -> int:
-    with _conn() as conn:
+    with _db() as conn:
         row = conn.execute(
             "SELECT sessions_done FROM clients WHERE chat_id=?", (chat_id,)
         ).fetchone()
@@ -140,7 +178,7 @@ def client_sessions_done(chat_id: int) -> int:
 
 
 def increment_client_sessions(chat_id: int) -> None:
-    with _conn() as conn:
+    with _db() as conn:
         conn.execute(
             "UPDATE clients SET sessions_done = sessions_done + 1 WHERE chat_id=?",
             (chat_id,),
@@ -148,7 +186,7 @@ def increment_client_sessions(chat_id: int) -> None:
 
 
 def account_heartbeat(account_name: str) -> None:
-    with _conn() as conn:
+    with _db() as conn:
         conn.execute(
             "UPDATE accounts SET last_seen=? WHERE account_name=?",
             (time.time(), account_name),
@@ -156,6 +194,6 @@ def account_heartbeat(account_name: str) -> None:
 
 
 def pool_status() -> list[dict]:
-    with _conn() as conn:
+    with _db() as conn:
         rows = conn.execute("SELECT * FROM accounts ORDER BY account_name").fetchall()
         return [dict(r) for r in rows]
