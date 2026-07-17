@@ -377,10 +377,9 @@ def admin_start_session():
 
     _telegram_send(
         client_chat_id,
-        f"Your Corvus session is ready!\n\n"
-        f"Platform: {platform}\n"
-        f"Account: {account}\n\n"
-        f"Connect via UltraViewer when Mike sends you the credentials.\n"
+        f"Your session is ready!\n\n"
+        f"Platform: {platform}\n\n"
+        f"Connect via UltraViewer when the admin sends you the credentials.\n"
         f"I'll guide you as you navigate — just keep going normally.",
     )
 
@@ -438,4 +437,7 @@ if __name__ == "__main__":
     from corvus_hack.db import init_db
     init_db()
     log.info("Master dispatcher starting on port 9200...")
-    app.run(host="0.0.0.0", port=9200, threaded=True)
+    # Bind loopback only. Workers reach the dispatcher via localhost, and
+    # 127.0.0.1 spans all local Windows sessions on this machine — so binding
+    # to 0.0.0.0 would expose the endpoint to the network for no benefit.
+    app.run(host="127.0.0.1", port=9200, threaded=True)
