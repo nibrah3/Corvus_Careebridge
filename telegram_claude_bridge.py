@@ -209,6 +209,10 @@ class _Session:
     last_prompt: str        = ""    # prompt used for the last answered question
     last_answer: str        = ""    # Claude's answer to the last question
     browser_type: str       = ""    # antidetect browser the client selected
+    # Per-session Q&A trail (question_number, answer) so a later question that
+    # references an earlier one in the SAME assessment session gets that context.
+    # Isolated from the cross-session `turns` table; cleared when the session ends.
+    qa_history: list[tuple[int, str]] = field(default_factory=list)
 
 
 _sessions: dict[int, _Session] = {}
@@ -516,20 +520,25 @@ def _show_in_session_buttons(chat_id: int, sess: _Session) -> None:
         sess.msg_id = mid
 
 
-def _handle_answer_question(chat_id: int, sess: _Session) -> None:
+def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = False) -> None:
     sess.question_count += 1
     qn = sess.question_count
 
-    # Scan for files added since last scan (question-specific audio/video/docs)
-    new_files = _find_recent_downloads(since=sess.last_scan_ts)
-    if new_files:
-        existing = set(sess.files)
-        added = [f for f in new_files if f not in existing]
-        sess.files.extend(added)
-        if added:
-            names = ", ".join(Path(f).name for f in added[:3])
-            send_message(chat_id, f"New file(s) picked up: {names}", parse_mode=None)
-    sess.last_scan_ts = time.time()
+    if no_attachment:
+        # Client explicitly said this question has no downloadable file — don't
+        # scan Downloads or imply a file is expected.
+        sess.last_scan_ts = time.time()
+    else:
+        # Scan for files added since last scan (question-specific audio/video/docs)
+        new_files = _find_recent_downloads(since=sess.last_scan_ts)
+        if new_files:
+            existing = set(sess.files)
+            added = [f for f in new_files if f not in existing]
+            sess.files.extend(added)
+            if added:
+                names = ", ".join(Path(f).name for f in added[:3])
+                send_message(chat_id, f"New file(s) picked up: {names}", parse_mode=None)
+        sess.last_scan_ts = time.time()
 
     # Tell the client to scroll — natural language, no mention of capture
     send_message(
@@ -540,6 +549,27 @@ def _handle_answer_question(chat_id: int, sess: _Session) -> None:
 
     # Build context: instruct Claude to take periodic screenshots during the scroll window
     ctx_lines = [f"[Question #{qn}]"]
+
+    # #11: give Claude the answers to earlier questions THIS session so it can
+    # keep a later question consistent with one it already answered.
+    if sess.qa_history:
+        ctx_lines.append("<previous_questions_this_session>")
+        for prev_qn, prev_ans in sess.qa_history[-5:]:
+            snippet = prev_ans if len(prev_ans) <= 600 else prev_ans[:600] + " …"
+            ctx_lines.append(f"[Q#{prev_qn} answer] {snippet}")
+        ctx_lines.append("</previous_questions_this_session>")
+        ctx_lines.append(
+            "If this question refers back to, builds on, or reuses anything from a "
+            "previous question above (e.g. 'as in the previous question', a shared "
+            "scenario, a running case study, or defined terms), stay consistent with "
+            "those earlier answers. Otherwise answer it independently."
+        )
+
+    if no_attachment:
+        ctx_lines.append(
+            "The client indicated this question has NO attachment — answer from the "
+            "on-screen content only; do not wait for or expect a downloaded file."
+        )
     if sess.files:
         ctx_lines.append(
             "Assessment files collected this session (guidelines + any question files): "
