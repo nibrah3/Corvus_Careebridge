@@ -499,8 +499,12 @@ def _handle_files_step(chat_id: int, sess: _Session, has_files: bool) -> None:
         "Navigate to your first question. If the question includes any files — "
         "audio clips or video — download those now as well. "
         "Then scroll slowly through the page from top to bottom, "
-        "and tap I'm Ready when you're on your question.",
-        [[("I'm Ready", "answer_q")], [("End Session", "done_session")]],
+        "and tap I'm Ready when you're on your question. "
+        "If the question has no file to download, tap No Attachment instead.",
+        [
+            [("I'm Ready", "answer_q"), ("No Attachment", "answer_q_noatt")],
+            [("End Session", "done_session")],
+        ],
     )
     if mid:
         sess.msg_id = mid
@@ -510,10 +514,11 @@ def _show_in_session_buttons(chat_id: int, sess: _Session) -> None:
     mid = _send_btn(
         chat_id,
         "For your next question: navigate to it, download any question files if there are any, "
-        "scroll slowly through the page, then tap I'm Ready.",
+        "scroll slowly through the page, then tap I'm Ready. "
+        "If it has no file, tap No Attachment. Tap Explanation to understand the last answer.",
         [
-            [("I'm Ready", "answer_q"), ("More Details", "more_details")],
-            [("End Session", "done_session")],
+            [("I'm Ready", "answer_q"), ("No Attachment", "answer_q_noatt")],
+            [("Explanation", "explain"), ("End Session", "done_session")],
         ],
     )
     if mid:
@@ -640,6 +645,8 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
         _record_turn(chat_id, prompt_text, final)
         sess.last_prompt = prompt_text
         sess.last_answer = final
+        # #11: remember this Q&A so a later related question stays consistent.
+        sess.qa_history.append((qn, final))
 
     if msg_id and len(final) <= _TG_MAX:
         try:
