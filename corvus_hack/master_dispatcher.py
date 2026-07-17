@@ -226,7 +226,8 @@ def handle_event():
     if session.get("status") != "active":
         return jsonify({"status": "paused"})
 
-    session["last_screen"] = screen[:500]
+    with _lock:
+        session["last_screen"] = screen[:500]
 
     def _respond():
         with _claude_sem:
