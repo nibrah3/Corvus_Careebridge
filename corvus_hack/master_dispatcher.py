@@ -13,7 +13,6 @@ import logging
 import os
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -48,7 +47,22 @@ BOT_TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CLAUDE_BIN   = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
 CLAUDE_TOOLS = "Read,Bash,Glob,Grep"   # minimal — guidance only
 CLAUDE_TIMEOUT = 90
-CWD = str(ROOT)
+# Neutral working dir for Claude subprocesses — keeps CLAUDE.md project discovery
+# out of the repo root, matching the telegram bridge's subprocess hygiene.
+CLAUDE_CWD   = r"C:\tmp"
+
+
+def _claude_env() -> dict:
+    """Environment for Claude subprocesses.
+
+    Blank ANTHROPIC_API_KEY forces subscription/OAuth auth so guidance calls are
+    NOT billed against an API key (project auth standard). CLAUDE_CODE_SIMPLE trims
+    noisy startup output. Mirrors telegram_claude_bridge.py.
+    """
+    env = os.environ.copy()
+    env["ANTHROPIC_API_KEY"] = ""
+    env["CLAUDE_CODE_SIMPLE"] = "1"
+    return env
 
 app = Flask(__name__)
 
@@ -81,21 +95,20 @@ def _telegram_send(chat_id: int, text: str) -> None:
 # ── Claude helper ─────────────────────────────────────────────────────────────
 
 def _call_claude(prompt_text: str) -> str:
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(prompt_text)
-        tmp = f.name
+    # NOTE: pass the prompt TEXT as a positional arg. The old code passed "-p <path>",
+    # but -p is an alias for --print, so the temp-file *path* became the prompt and
+    # Claude never saw the actual question. Prompts here are small (screen text is
+    # capped upstream), so a positional arg is safe and avoids the temp file entirely.
     try:
         result = subprocess.run(
             [
                 CLAUDE_BIN, "--print",
                 "--output-format", "json",
                 "--allowedTools", CLAUDE_TOOLS,
-                "-p", tmp,
+                prompt_text,
             ],
             capture_output=True, text=True, encoding="utf-8",
-            timeout=CLAUDE_TIMEOUT, cwd=CWD,
+            timeout=CLAUDE_TIMEOUT, cwd=CLAUDE_CWD, env=_claude_env(),
         )
         raw = (result.stdout or "").strip()
         if not raw:
@@ -110,11 +123,6 @@ def _call_claude(prompt_text: str) -> str:
         return "(Claude timed out — screen too complex)"
     except Exception as e:
         return f"(Claude error: {e})"
-    finally:
-        try:
-            os.unlink(tmp)
-        except Exception:
-            pass
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
 
