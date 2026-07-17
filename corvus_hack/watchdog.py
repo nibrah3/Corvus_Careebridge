@@ -117,10 +117,22 @@ def _check() -> None:
     issues: list[str] = []
 
     if not _port_open(MASTER_PORT):
-        print("[watchdog] master_dispatcher DOWN — restarting")
-        _start_bg(MASTER_SCRIPT)
-        time.sleep(5)
-        issues.append("master_dispatcher was down — restarted automatically")
+        # A closed port can be transient (busy long-poll, mid-restart). Re-check
+        # after a short grace delay before assuming the dispatcher is really down.
+        time.sleep(3)
+        if not _port_open(MASTER_PORT):
+            # Only spawn a replacement if NO master_dispatcher process exists.
+            # Spawning while the original was alive-but-unresponsive is what caused
+            # the 2026-07-17 duplicate-dispatcher incident (two instances long-polling
+            # the same bot token). _process_running() fails safe (returns True on a
+            # check error), so we never spawn a duplicate on doubt.
+            if _process_running("master_dispatcher"):
+                print("[watchdog] master port closed but process still alive — NOT restarting (avoids duplicate)")
+            else:
+                print("[watchdog] master_dispatcher DOWN — restarting")
+                _start_bg(MASTER_SCRIPT)
+                time.sleep(5)
+                issues.append("master_dispatcher was down — restarted automatically")
 
     if not _process_running("telegram_claude_bridge"):
         print("[watchdog] telegram_claude_bridge DOWN — restarting")
@@ -129,10 +141,15 @@ def _check() -> None:
 
     if MIKE_MODE:
         if not _port_open(CAPTURE_PORT):
-            print("[watchdog] capture_server DOWN — restarting")
-            _start_bg(CAPTURE_SCRIPT, args=["8703"])
             time.sleep(3)
-            issues.append("capture_server was down — restarted automatically")
+            if not _port_open(CAPTURE_PORT):
+                if _process_running("capture_server"):
+                    print("[watchdog] capture port closed but process still alive — NOT restarting (avoids duplicate)")
+                else:
+                    print("[watchdog] capture_server DOWN — restarting")
+                    _start_bg(CAPTURE_SCRIPT, args=["8703"])
+                    time.sleep(3)
+                    issues.append("capture_server was down — restarted automatically")
 
         if not _process_running("worker.py"):
             print("[watchdog] worker DOWN — restarting")
