@@ -681,11 +681,15 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
 
     elaboration_prompt = (
         f"My previous answer was:\n{sess.last_answer}\n\n"
-        "Please expand on this answer with more detail:\n"
-        "- Deeper explanation of why each part is correct\n"
-        "- Any additional examples or evidence from the instructions that support the answer\n"
-        "- Any alternative phrasings that would still be acceptable\n"
-        "- Anything else the student should know to answer this question well"
+        "Explain this answer so the student understands WHY it is correct. Cover:\n"
+        "- The reasoning: why each part of the answer is right, tied to the "
+        "question and the instructions/guidelines.\n"
+        "- Supporting evidence or examples from the material.\n"
+        "Then, on a clearly separated final line, add:\n"
+        "MUST KEEP: <comma-separated list of the exact keywords / phrases / terms "
+        "that must NOT be changed or reworded if the student paraphrases the answer>.\n"
+        "These are the load-bearing words the grader looks for — everything else "
+        "the student may rephrase in their own words, but these must stay verbatim."
     )
     with _claude_lock:
         prompt = _build_prompt(chat_id, elaboration_prompt)
@@ -733,6 +737,7 @@ def _handle_done_session(chat_id: int, sess: _Session) -> None:
     sess.last_prompt = ""
     sess.last_answer = ""
     sess.browser_type = ""
+    sess.qa_history = []
     mid = _send_btn(
         chat_id,
         f"Session complete — {count} question(s) answered.\n\n"
@@ -1451,17 +1456,20 @@ def _handle_callback(cq: dict) -> None:
     elif data == "no_files":
         _handle_files_step(chat_id, sess, has_files=False)
 
-    elif data == "answer_q":
+    elif data in ("answer_q", "answer_q_noatt"):
         if sess.stage == _Stage.IN_SESSION:
             threading.Thread(
                 target=_handle_answer_question,
                 args=(chat_id, sess),
+                kwargs={"no_attachment": data == "answer_q_noatt"},
                 daemon=True,
             ).start()
         else:
             _show_welcome(chat_id, sess)
 
-    elif data == "more_details":
+    # "explain" is the current button; "more_details" is kept as a backward-compat
+    # alias for any older message still showing the old button.
+    elif data in ("explain", "more_details"):
         if sess.stage == _Stage.IN_SESSION:
             threading.Thread(
                 target=_handle_more_details,
