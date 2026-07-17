@@ -642,7 +642,14 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
             send_message(chat_id, f"Error: {exc}", parse_mode=None)
             _show_in_session_buttons(chat_id, sess)
             return
-        _record_turn(chat_id, prompt_text, final)
+        # Cross-session `turns` history: store a COMPACT label as the user turn,
+        # never the full prompt_text (which contains this question's entire
+        # 7-screenshot analysis). Storing the raw prompt_text would re-inject every
+        # prior question's screen analysis into <conversation_history> on every
+        # later prompt — huge bloat, higher latency, and diluted focus. The answer
+        # (`final`) is the part worth remembering long-term; rich in-session
+        # continuity is carried separately by sess.qa_history below.
+        _record_turn(chat_id, f"[Assessment question #{qn}]", final)
         sess.last_prompt = prompt_text
         sess.last_answer = final
         # #11: remember this Q&A so a later related question stays consistent.
@@ -715,7 +722,9 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
                     pass
             _show_in_session_buttons(chat_id, sess)
             return
-        _record_turn(chat_id, elaboration_prompt, final)
+        # Compact label for the same reason as the answer flow — don't store the
+        # elaboration_prompt (it embeds the full previous answer).
+        _record_turn(chat_id, "[Explanation of the previous answer]", final)
 
     if msg_id and len(final) <= _TG_MAX:
         try:
