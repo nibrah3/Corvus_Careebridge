@@ -272,4 +272,10 @@ def admin_chat_ids() -> list[int]:
                     ids.append(uid)
             except ValueError:
                 pass
-    return ids or [7994812711]
+    if not ids:
+        # No admin IDs resolved from env — do NOT fall back to a hardcoded ID.
+        # Fail loud so a broken .env is noticed instead of silently routing
+        # admin traffic to a stale/unintended account.
+        print("[telegram] WARNING: no admin chat IDs in env "
+              "(TELEGRAM_ADMIN_CHAT_ID / TELEGRAM_ADMIN_IDS) — admin routing disabled")
+    return ids
