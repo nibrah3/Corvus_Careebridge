@@ -2,8 +2,10 @@
 watchdog.py — Corvus health guardian for Mike's session daemons.
 
 Runs as a persistent background process at Mike's logon (Task Scheduler).
-Every 2 minutes: checks master_dispatcher (port 9200) and telegram_claude_bridge
-(process list). Restarts anything that's down and sends a Telegram alert.
+Every 60 seconds (CHECK_INTERVAL): checks master_dispatcher (port 9200) and
+telegram_claude_bridge (process list). Restarts anything that's down — but only
+after confirming it is genuinely dead, never on a merely-closed port — and sends
+a Telegram alert.
 """
 from __future__ import annotations
 
