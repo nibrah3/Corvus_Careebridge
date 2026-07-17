@@ -367,10 +367,10 @@ def _handle_browser_selected(chat_id: int, sess: _Session, data: str) -> None:
         try:
             send_message(
                 admin_id,
-                f"Client ready for setup:\n"
+                f"Client ready — send them your UltraViewer ID:\n"
                 f"  User: {user_str}  (chat_id: {chat_id})\n"
                 f"  Browser: {sess.browser_type}\n\n"
-                f"Set up the browser profile, then send:\n"
+                f"Once connected, run:\n"
                 f"  /connect {chat_id} <UltraViewer_ID>",
                 parse_mode=None,
             )
@@ -1404,7 +1404,7 @@ def _handle_callback(cq: dict) -> None:
             daemon=True,
         ).start()
 
-    elif data in ("browser_multilogin", "browser_gologin",
+    elif data in ("browser_morelogin", "browser_gologin",
                   "browser_adspower", "browser_ixbrowser"):
         _handle_browser_selected(chat_id, sess, data)
 
