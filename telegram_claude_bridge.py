@@ -941,12 +941,14 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
         ]
     else:
         cmd += ["--allowedTools", "none"]  # no tools — answer from prompt only
-    cmd.append(prompt)
+    # Prompt goes via stdin, not as a positional arg — see _ask_claude_plain
+    # for why (cmd.exe's ~8191-char command-line limit vs. the multi-KB
+    # --system-prompt plus a potentially large prompt).
 
     proc = subprocess.Popen(
         cmd,
         cwd=_CWD,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -962,6 +964,16 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
     _did_timeout = threading.Event()
     stdout_q: "_queue.Queue[str | None]" = _queue.Queue()
     stderr_lines: list[str] = []
+
+    def _writer() -> None:
+        # Runs in its own thread so a large prompt can't deadlock against a
+        # child that isn't draining stdin yet while we're also trying to
+        # drain its stdout/stderr.
+        try:
+            proc.stdin.write(prompt)  # type: ignore[union-attr]
+            proc.stdin.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
 
     def _reader() -> None:
         try:
@@ -1006,6 +1018,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
                     pass
         stdout_q.put(None)  # unblock main loop if kill succeeded
 
+    threading.Thread(target=_writer, daemon=True).start()
     threading.Thread(target=_reader, daemon=True).start()
     threading.Thread(target=_reader_stderr, daemon=True).start()
     kill_timer = threading.Timer(_TIMEOUT, _kill_on_timeout)
