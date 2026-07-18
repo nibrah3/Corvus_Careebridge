@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import uuid
 from collections import deque
 from pathlib import Path
@@ -435,9 +436,21 @@ def admin_sessions():
 
 if __name__ == "__main__":
     from corvus_hack.db import init_db
-    init_db()
-    log.info("Master dispatcher starting on port 9200...")
-    # Bind loopback only. Workers reach the dispatcher via localhost, and
-    # 127.0.0.1 spans all local Windows sessions on this machine — so binding
-    # to 0.0.0.0 would expose the endpoint to the network for no benefit.
-    app.run(host="127.0.0.1", port=9200, threaded=True)
+
+    _startup_log = Path(__file__).resolve().parent.parent / "logs" / "master_dispatcher_startup.log"
+    try:
+        _startup_log.parent.mkdir(parents=True, exist_ok=True)
+        init_db()
+        log.info("Master dispatcher starting on port 9200...")
+        with _startup_log.open("a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} startup OK, launching on 127.0.0.1:9200\n")
+        # Bind loopback only. Workers reach the dispatcher via localhost, and
+        # 127.0.0.1 spans all local Windows sessions on this machine — so binding
+        # to 0.0.0.0 would expose the endpoint to the network for no benefit.
+        app.run(host="127.0.0.1", port=9200, threaded=True)
+    except Exception:
+        with _startup_log.open("a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} STARTUP FAILED:\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
+        raise
