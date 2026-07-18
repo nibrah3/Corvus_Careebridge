@@ -690,13 +690,14 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
         f"My previous answer was:\n{sess.last_answer}\n\n"
         "Explain this answer so the student understands WHY it is correct. Cover:\n"
         "- The reasoning: why each part of the answer is right, tied to the "
-        "question and the instructions/guidelines.\n"
-        "- Supporting evidence or examples from the material.\n"
-        "Then, on a clearly separated final line, add:\n"
-        "MUST KEEP: <comma-separated list of the exact keywords / phrases / terms "
-        "that must NOT be changed or reworded if the student paraphrases the answer>.\n"
-        "These are the load-bearing words the grader looks for — everything else "
-        "the student may rephrase in their own words, but these must stay verbatim."
+        "question and the assessment's actual instructions/guidelines.\n"
+        "- Supporting evidence or examples from the material.\n\n"
+        "Follow the assessment's guidelines and instructions strictly, to the letter — "
+        "do not add, soften, or override anything they say. If the KEY NOTES section "
+        "of the previous answer above already identifies mandatory keywords, exact "
+        "phrases, or verbatim requirements, honor those exactly as stated in your "
+        "explanation. Do not invent additional requirements that aren't grounded in "
+        "the guidelines or the previous answer."
     )
     with _claude_lock:
         prompt = _build_prompt(chat_id, elaboration_prompt)
