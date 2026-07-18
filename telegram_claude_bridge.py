@@ -956,6 +956,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
     final_result = ""
     _did_timeout = threading.Event()
     stdout_q: "_queue.Queue[str | None]" = _queue.Queue()
+    stderr_lines: list[str] = []
 
     def _reader() -> None:
         try:
@@ -964,6 +965,17 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
         except Exception:
             pass
         stdout_q.put(None)  # EOF sentinel
+
+    def _reader_stderr() -> None:
+        # Must drain stderr concurrently with stdout, or the child blocks on a
+        # full pipe buffer (Windows default 64KB) whenever it writes enough
+        # diagnostic output there — this manifests as an intermittent hang
+        # that looks unrelated to any flag or prompt content.
+        try:
+            for line in proc.stderr:  # type: ignore[union-attr]
+                stderr_lines.append(line)
+        except Exception:
+            pass
 
     def _kill_on_timeout() -> None:
         _did_timeout.set()
@@ -990,6 +1002,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
         stdout_q.put(None)  # unblock main loop if kill succeeded
 
     threading.Thread(target=_reader, daemon=True).start()
+    threading.Thread(target=_reader_stderr, daemon=True).start()
     kill_timer = threading.Timer(_TIMEOUT, _kill_on_timeout)
     kill_timer.start()
 
@@ -1046,11 +1059,18 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
                 pass  # process tree already killed by _kill_on_timeout; don't block
 
     if _did_timeout.is_set():
+        stderr_text = "".join(stderr_lines).strip()
+        if stderr_text:
+            log.warning("Claude stream timed out; stderr was:\n%s", stderr_text)
         raise subprocess.TimeoutExpired("claude", _TIMEOUT)
 
     result_text = final_result or accumulated.strip()
     if not result_text:
-        log.warning("Claude stream returned no output (did_timeout=%s)", _did_timeout.is_set())
+        stderr_text = "".join(stderr_lines).strip()
+        log.warning(
+            "Claude stream returned no output (did_timeout=%s, exit=%s); stderr:\n%s",
+            _did_timeout.is_set(), proc.returncode, stderr_text or "(empty)",
+        )
         return "I didn't get a response — please tap the button to try again."
     return result_text
 
