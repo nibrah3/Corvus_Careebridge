@@ -886,12 +886,17 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
         ]
     else:
         cmd += ["--allowedTools", "none"]  # no tools — answer from prompt only
-    cmd.append(prompt)
+    # Prompt goes via stdin, not as a positional arg — a long prompt (e.g. the
+    # elaboration flow embeds the full previous answer) combined with the
+    # multi-KB --system-prompt can push the total command line past the
+    # ~8191-char limit the claude.cmd shim inherits from cmd.exe, which drops
+    # the final argument and makes the CLI exit with "Input must be provided
+    # either through stdin or as a prompt argument". Stdin has no such limit.
 
     result = subprocess.run(
         cmd,
         cwd=_CWD,
-        stdin=subprocess.DEVNULL,
+        input=prompt,
         capture_output=True,
         text=True,
         encoding="utf-8",
