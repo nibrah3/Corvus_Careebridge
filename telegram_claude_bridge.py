@@ -807,6 +807,12 @@ def _show_client_prompt(chat_id: int, sess: _Session) -> None:
 _CLAUDE_TOOLS_SCREEN = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
 _CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
 _MCP_CONFIG = str(ROOT / "bridge_mcp.json")
+# screen=False calls use --allowedTools none (no tools at all), but without an
+# explicit --mcp-config the CLI still connects every MCP server from the
+# user's global config before it can answer — measured ~40s of pure startup
+# overhead (53.7s -> 16.8s once scoped to an empty config). --strict-mcp-config
+# is required for --mcp-config to fully replace rather than merge with globals.
+_MCP_CONFIG_EMPTY = str(ROOT / "empty_mcp.json")
 
 # Fast model: no extended thinking, no MCP overhead → ~5-15s for conversational
 # Smart model: extended thinking + MCPs → used only for screen-reading queries
@@ -928,7 +934,11 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
             "--strict-mcp-config",
         ]
     else:
-        cmd += ["--allowedTools", "none"]  # no tools — answer from prompt only
+        cmd += [
+            "--allowedTools", "none",  # no tools — answer from prompt only
+            "--mcp-config", _MCP_CONFIG_EMPTY,
+            "--strict-mcp-config",  # skip connecting the global MCP server list
+        ]
     # Prompt goes via stdin, not as a positional arg — a long prompt (e.g. the
     # elaboration flow embeds the full previous answer) combined with the
     # multi-KB --system-prompt can push the total command line past the
@@ -989,7 +999,11 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
             "--strict-mcp-config",
         ]
     else:
-        cmd += ["--allowedTools", "none"]  # no tools — answer from prompt only
+        cmd += [
+            "--allowedTools", "none",  # no tools — answer from prompt only
+            "--mcp-config", _MCP_CONFIG_EMPTY,
+            "--strict-mcp-config",  # skip connecting the global MCP server list
+        ]
     # Prompt goes via stdin, not as a positional arg — see _ask_claude_plain
     # for why (cmd.exe's ~8191-char command-line limit vs. the multi-KB
     # --system-prompt plus a potentially large prompt).
