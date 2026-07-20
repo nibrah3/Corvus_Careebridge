@@ -50,6 +50,12 @@ BOT_TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CLAUDE_BIN   = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
 CLAUDE_TOOLS = "Read,Bash,Glob,Grep"   # minimal — guidance only
 CLAUDE_TIMEOUT = 90
+# CLAUDE_TOOLS uses no MCP tools, but without --mcp-config the CLI still
+# connects every server in the global config before answering — measured
+# ~40s of pure startup overhead in telegram_claude_bridge.py's identical
+# case (53.7s -> 16.8s once scoped). --strict-mcp-config makes --mcp-config
+# fully replace rather than merge with globals.
+CLAUDE_MCP_CONFIG_EMPTY = str(ROOT / "empty_mcp.json")
 # Neutral working dir for Claude subprocesses — keeps CLAUDE.md project discovery
 # out of the repo root, matching the telegram bridge's subprocess hygiene.
 CLAUDE_CWD   = r"C:\tmp"
@@ -111,6 +117,8 @@ def _call_claude(prompt_text: str) -> str:
                     CLAUDE_BIN, "--print",
                     "--output-format", "json",
                     "--allowedTools", CLAUDE_TOOLS,
+                    "--mcp-config", CLAUDE_MCP_CONFIG_EMPTY,
+                    "--strict-mcp-config",
                     prompt_text,
                 ],
                 capture_output=True, text=True, encoding="utf-8",
