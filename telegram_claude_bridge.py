@@ -1105,6 +1105,14 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
         raise subprocess.TimeoutExpired("claude", _TIMEOUT)
 
     result_text = final_result or accumulated.strip()
+    if result_text and _is_cli_error_text(result_text):
+        stderr_text = "".join(stderr_lines).strip()
+        log.warning(
+            "Claude stream returned CLI auth/billing diagnostic (did_timeout=%s, exit=%s); "
+            "result_text: %.300s; stderr:\n%s",
+            _did_timeout.is_set(), proc.returncode, result_text[:300], stderr_text or "(empty)",
+        )
+        return "I didn't get a response — please tap the button to try again."
     if not result_text:
         stderr_text = "".join(stderr_lines).strip()
         log.warning(
