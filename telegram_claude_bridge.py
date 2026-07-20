@@ -1674,7 +1674,7 @@ def main() -> None:
                     ).start()
                 else:
                     threading.Thread(target=_handle, args=(item,), daemon=True).start()
-            except queue.Empty:
+            except _queue.Empty:
                 pass
             except Exception:
                 pass
@@ -1690,7 +1690,7 @@ def main() -> None:
                     ).start()
                 else:
                     threading.Thread(target=_handle_client, args=(item,), daemon=True).start()
-            except queue.Empty:
+            except _queue.Empty:
                 pass
             except Exception:
                 pass
