@@ -727,7 +727,7 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
         except subprocess.TimeoutExpired:
             if msg_id:
                 try:
-                    edit_message(chat_id, msg_id, "Timed out — please try again.", parse_mode=None)
+                    client_edit_message(chat_id, msg_id, "Timed out — please try again.", parse_mode=None)
                 except Exception:
                     pass
             _show_in_session_buttons(chat_id, sess)
@@ -736,7 +736,7 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
             log.exception("More details call failed")
             if msg_id:
                 try:
-                    edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
+                    client_edit_message(chat_id, msg_id, f"Error: {exc}", parse_mode=None)
                 except Exception:
                     pass
             _show_in_session_buttons(chat_id, sess)
@@ -747,11 +747,11 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
 
     if msg_id and len(final) <= _TG_MAX:
         try:
-            edit_message(chat_id, msg_id, final, parse_mode=None)
+            client_edit_message(chat_id, msg_id, final, parse_mode=None)
         except Exception:
-            _send_chunks(chat_id, final)
+            _send_chunks(chat_id, final, send_fn=client_send_message)
     else:
-        _send_chunks(chat_id, final)
+        _send_chunks(chat_id, final, send_fn=client_send_message)
 
     _show_in_session_buttons(chat_id, sess)
 
@@ -1518,7 +1518,7 @@ def _handle_callback(cq: dict) -> None:
 
     # Acknowledge the tap immediately so Telegram removes the spinner
     try:
-        answer_callback(cq_id)
+        client_answer_callback(cq_id)
     except Exception:
         pass
 
