@@ -1124,6 +1124,7 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass  # process tree already killed by _kill_on_timeout; don't block
+        _cli_lock.__exit__(None, None, None)
 
     if _did_timeout.is_set():
         stderr_text = "".join(stderr_lines).strip()
