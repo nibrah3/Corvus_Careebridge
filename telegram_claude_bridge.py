@@ -826,10 +826,16 @@ def _needs_screen(text: str) -> bool:
 
 
 def _subprocess_env() -> dict:
-    """Force claude CLI into subscription (OAuth) mode, no CLAUDE.md."""
+    """Force claude CLI into subscription (OAuth) mode.
+
+    CLAUDE_CODE_SIMPLE=1 (== --bare) must NOT be set here: it forces
+    strict API-key-only auth and never reads OAuth/keychain credentials,
+    which guarantees "Could not resolve authentication method" once
+    ANTHROPIC_API_KEY is stripped below. _CWD has no CLAUDE.md anyway,
+    so there's nothing to suppress.
+    """
     env = os.environ.copy()
     env.pop("ANTHROPIC_API_KEY", None)  # force subscription mode, never API credits
-    env["CLAUDE_CODE_SIMPLE"] = "1"     # disable CLAUDE.md auto-discovery
     return env
 
 
