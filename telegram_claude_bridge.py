@@ -869,6 +869,23 @@ def _thinking_message(screen: bool) -> str:
     return pool[idx]
 
 
+_CLI_ERROR_SIGNATURES = (
+    "not logged in",
+    "please run /login",
+    "credit balance is too low",
+    "connectors are disabled",
+    "invalid api key",
+    "authentication_error",
+)
+
+
+def _is_cli_error_text(text: str) -> bool:
+    """True if text looks like a raw Claude CLI auth/billing diagnostic rather
+    than a real answer — these must never be forwarded to chat verbatim."""
+    lowered = text.lower()
+    return any(sig in lowered for sig in _CLI_ERROR_SIGNATURES)
+
+
 def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
     model = _MODEL_SMART if screen else _MODEL_FAST
     cmd = [
