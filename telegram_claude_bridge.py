@@ -68,9 +68,26 @@ logging.basicConfig(
 log = logging.getLogger("bridge")
 
 from telegram_mcp._bot import (
-    admin_chat_ids, bus, send_message, edit_message,
-    send_inline_keyboard, answer_callback,
+    admin_chat_ids, bus,
+    send_message as admin_send_message,
+    edit_message as admin_edit_message,
+    send_inline_keyboard as admin_send_inline_keyboard,
+    answer_callback as admin_answer_callback,
 )
+from telegram_mcp._session_bot import (
+    client_bus,
+    send_message as client_send_message,
+    edit_message as client_edit_message,
+    send_inline_keyboard as client_send_inline_keyboard,
+    answer_callback as client_answer_callback,
+)
+
+# Back-compat aliases — admin-bound by default; any call site not touched by
+# the client/admin split below keeps behaving exactly as before.
+send_message = admin_send_message
+edit_message = admin_edit_message
+send_inline_keyboard = admin_send_inline_keyboard
+answer_callback = admin_answer_callback
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
