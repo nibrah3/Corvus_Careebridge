@@ -343,6 +343,7 @@ def _send_btn(chat_id: int, text: str, rows: list[list[tuple[str, str]]]) -> int
     resp = client_send_inline_keyboard(chat_id, text, rows)
     if resp.get("ok"):
         return resp["result"]["message_id"]
+    log.warning("client send_inline_keyboard failed chat=%s resp=%s", chat_id, resp)
     return None
 
 
