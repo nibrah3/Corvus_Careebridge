@@ -338,7 +338,7 @@ def _find_recent_downloads(since: float = 0.0) -> list[str]:
 
 
 def _send_btn(chat_id: int, text: str, rows: list[list[tuple[str, str]]]) -> int | None:
-    resp = send_inline_keyboard(chat_id, text, rows)
+    resp = client_send_inline_keyboard(chat_id, text, rows)
     if resp.get("ok"):
         return resp["result"]["message_id"]
     return None
@@ -399,7 +399,7 @@ def _handle_browser_selected(chat_id: int, sess: _Session, data: str) -> None:
         except Exception:
             pass
 
-    send_message(
+    client_send_message(
         chat_id,
         "Your session is being set up — hang tight, you'll be notified when it's ready.",
         parse_mode=None,
