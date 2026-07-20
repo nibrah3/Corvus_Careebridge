@@ -10,11 +10,14 @@ shared mutable state between admin and client traffic.
 """
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import threading
 import time
 import requests
+
+log = logging.getLogger("bridge.session_bot")
 
 _BASE = "https://api.telegram.org/bot{token}/{method}"
 _TIMEOUT = 35

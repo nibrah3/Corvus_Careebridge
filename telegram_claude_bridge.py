@@ -1585,9 +1585,16 @@ def _handle_callback(cq: dict) -> None:
     data: str = cq.get("data", "")
     cq_id: str = cq.get("id", "")
 
+    log.info(
+        "DIAG cq entry chat=%s data=%r in_admins=%s in_test_client=%s",
+        chat_id, data, chat_id in _ADMINS, chat_id in _test_client_ids,
+    )
+
     if not chat_id or not data:
+        log.info("DIAG cq dropped: missing chat_id or data")
         return
     if chat_id in _ADMINS and chat_id not in _test_client_ids:
+        log.info("DIAG cq dropped: admin guard (not in test-client mode)")
         return  # admin callbacks are handled elsewhere (MCP tools)
 
     log.info("client callback chat=%s data=%r", chat_id, data)
