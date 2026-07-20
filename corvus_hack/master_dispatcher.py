@@ -25,6 +25,8 @@ sys.path.insert(0, str(ROOT))
 
 from flask import Flask, request, jsonify
 
+from claude_cli_lock import claude_cli_lock
+
 # ── Env / config ──────────────────────────────────────────────────────────────
 
 def _load_env() -> None:
@@ -101,16 +103,17 @@ def _call_claude(prompt_text: str) -> str:
     # Claude never saw the actual question. Prompts here are small (screen text is
     # capped upstream), so a positional arg is safe and avoids the temp file entirely.
     try:
-        result = subprocess.run(
-            [
-                CLAUDE_BIN, "--print",
-                "--output-format", "json",
-                "--allowedTools", CLAUDE_TOOLS,
-                prompt_text,
-            ],
-            capture_output=True, text=True, encoding="utf-8",
-            timeout=CLAUDE_TIMEOUT, cwd=CLAUDE_CWD, env=_claude_env(),
-        )
+        with claude_cli_lock():
+            result = subprocess.run(
+                [
+                    CLAUDE_BIN, "--print",
+                    "--output-format", "json",
+                    "--allowedTools", CLAUDE_TOOLS,
+                    prompt_text,
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+                timeout=CLAUDE_TIMEOUT, cwd=CLAUDE_CWD, env=_claude_env(),
+            )
         raw = (result.stdout or "").strip()
         if not raw:
             err = (result.stderr or "").strip()

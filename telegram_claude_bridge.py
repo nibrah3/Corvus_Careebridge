@@ -37,6 +37,8 @@ from collections import deque
 
 import requests as _requests
 
+from claude_cli_lock import claude_cli_lock
+
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).parent
@@ -928,18 +930,19 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
     # the final argument and makes the CLI exit with "Input must be provided
     # either through stdin or as a prompt argument". Stdin has no such limit.
 
-    result = subprocess.run(
-        cmd,
-        cwd=_CWD,
-        input=prompt,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=_TIMEOUT,
-        env=_subprocess_env(),
-        startupinfo=_startupinfo(),
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    with claude_cli_lock():
+        result = subprocess.run(
+            cmd,
+            cwd=_CWD,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_TIMEOUT,
+            env=_subprocess_env(),
+            startupinfo=_startupinfo(),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
     raw = (result.stdout or "").strip()
     if not raw:
         err = (result.stderr or "").strip()
