@@ -985,18 +985,27 @@ def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
     # for why (cmd.exe's ~8191-char command-line limit vs. the multi-KB
     # --system-prompt plus a potentially large prompt).
 
-    proc = subprocess.Popen(
-        cmd,
-        cwd=_CWD,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        env=_subprocess_env(),
-        startupinfo=_startupinfo(),
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    # Held across the whole child lifetime (not just spawn) — claude.cmd can
+    # touch the shared OAuth credential file at any point while it runs, and
+    # master_dispatcher.py's own claude.cmd calls must not overlap with it.
+    _cli_lock = claude_cli_lock()
+    _cli_lock.__enter__()
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=_CWD,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=_subprocess_env(),
+            startupinfo=_startupinfo(),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception:
+        _cli_lock.__exit__(None, None, None)
+        raise
 
     accumulated = ""
     last_update = 0.0
