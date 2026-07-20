@@ -560,11 +560,11 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
             sess.files.extend(added)
             if added:
                 names = ", ".join(Path(f).name for f in added[:3])
-                send_message(chat_id, f"New file(s) picked up: {names}", parse_mode=None)
+                client_send_message(chat_id, f"New file(s) picked up: {names}", parse_mode=None)
         sess.last_scan_ts = time.time()
 
     # Tell the client to scroll — natural language, no mention of capture
-    send_message(
+    client_send_message(
         chat_id,
         "Got it — scroll through the page now, nice and steady.",
         parse_mode=None,
@@ -623,7 +623,7 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
     prompt_text = "\n".join(ctx_lines)
 
     # Send "working" message
-    resp = send_message(chat_id, f"Reading question {qn}...", parse_mode=None)
+    resp = client_send_message(chat_id, f"Reading question {qn}...", parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
         msg_id = resp["result"]["message_id"]
@@ -632,7 +632,7 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
         if msg_id:
             preview = acc[-_TG_MAX:] if len(acc) > _TG_MAX else acc
             try:
-                edit_message(chat_id, msg_id, preview, parse_mode=None)
+                client_edit_message(chat_id, msg_id, preview, parse_mode=None)
             except Exception:
                 pass
 
