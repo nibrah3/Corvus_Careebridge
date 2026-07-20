@@ -1247,6 +1247,48 @@ def _master_post(path: str, body: dict) -> dict | None:
         return None
 
 
+def _handle_client(msg: dict) -> None:
+    """Dispatch a text message arriving on the client bus (Passerclue).
+
+    Every update on this bus is inherently client traffic — no admin-command
+    branching here (that only exists on the admin bus / Cyhub).
+    """
+    chat_id = msg.get("chat", {}).get("id", 0)
+    username = msg.get("chat", {}).get("username", "")
+    text = (msg.get("text") or "").strip()
+    if not text:
+        return
+
+    log.info("client chat=%s  %r", chat_id, text[:60])
+
+    with _sessions_lock:
+        sess = _sessions.get(chat_id)
+        if sess is None:
+            sess = _Session(chat_id=chat_id)
+            _sessions[chat_id] = sess
+        if username and not sess.username:
+            sess.username = username
+
+    # Notify admin on first contact
+    with _db_lock:
+        is_new = _db.execute(
+            "SELECT 1 FROM turns WHERE chat_id=? LIMIT 1", (chat_id,)
+        ).fetchone() is None
+    if is_new:
+        user_str = f"@{username}" if username else str(chat_id)
+        for admin_id in _ADMINS:
+            try:
+                send_message(
+                    admin_id,
+                    f"New client: {user_str}  (chat_id: {chat_id})\nFirst message: {text[:200]}",
+                    parse_mode=None,
+                )
+            except Exception:
+                pass
+
+    _show_client_prompt(chat_id, sess)
+
+
 def _handle(msg: dict) -> None:
     chat_id = msg.get("chat", {}).get("id", 0)
     username = msg.get("chat", {}).get("username", "")
@@ -1594,6 +1636,7 @@ def main() -> None:
     log.info("DB: %s", _DB_PATH)
 
     bus.start()
+    client_bus.start()
 
     # Prewarm: run a trivial Claude call so Node.js JIT is hot before the
     # first real client query. Runs in background; holds _claude_lock while
@@ -1620,19 +1663,41 @@ def main() -> None:
         except Exception:
             pass
 
-    log.info("Listening for Telegram messages...")
-    while True:
-        try:
-            item = bus.listener_queue.get(timeout=5)
-            if "_cq" in item:
-                # Inline button tap — dispatch to callback handler
-                threading.Thread(
-                    target=_handle_callback, args=(item["_cq"],), daemon=True
-                ).start()
-            else:
-                threading.Thread(target=_handle, args=(item,), daemon=True).start()
-        except Exception:
-            pass
+    def _consume_admin_bus() -> None:
+        while True:
+            try:
+                item = bus.listener_queue.get(timeout=5)
+                if "_cq" in item:
+                    # Inline button tap — dispatch to callback handler
+                    threading.Thread(
+                        target=_handle_callback, args=(item["_cq"],), daemon=True
+                    ).start()
+                else:
+                    threading.Thread(target=_handle, args=(item,), daemon=True).start()
+            except queue.Empty:
+                pass
+            except Exception:
+                pass
+
+    def _consume_client_bus() -> None:
+        while True:
+            try:
+                item = client_bus.listener_queue.get(timeout=5)
+                if "_cq" in item:
+                    # Inline button tap — dispatch to callback handler
+                    threading.Thread(
+                        target=_handle_callback, args=(item["_cq"],), daemon=True
+                    ).start()
+                else:
+                    threading.Thread(target=_handle_client, args=(item,), daemon=True).start()
+            except queue.Empty:
+                pass
+            except Exception:
+                pass
+
+    log.info("Listening for Telegram messages (admin + client buses)...")
+    threading.Thread(target=_consume_client_bus, daemon=True, name="client-bus-consumer").start()
+    _consume_admin_bus()
 
 
 if __name__ == "__main__":
