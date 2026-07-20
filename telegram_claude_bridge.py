@@ -646,7 +646,7 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
         except subprocess.TimeoutExpired:
             if msg_id:
                 try:
-                    edit_message(
+                    client_edit_message(
                         chat_id, msg_id,
                         f"Sorry, that took too long ({_TIMEOUT}s). Tap I'm Ready to try again.",
                         parse_mode=None,
@@ -657,7 +657,7 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
             return
         except Exception as exc:
             log.exception("Assessment Claude call failed")
-            send_message(chat_id, f"Error: {exc}", parse_mode=None)
+            client_send_message(chat_id, f"Error: {exc}", parse_mode=None)
             _show_in_session_buttons(chat_id, sess)
             return
         # Cross-session `turns` history: store a COMPACT label as the user turn,
@@ -675,11 +675,11 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
 
     if msg_id and len(final) <= _TG_MAX:
         try:
-            edit_message(chat_id, msg_id, final, parse_mode=None)
+            client_edit_message(chat_id, msg_id, final, parse_mode=None)
         except Exception:
-            _send_chunks(chat_id, final)
+            _send_chunks(chat_id, final, send_fn=client_send_message)
     else:
-        _send_chunks(chat_id, final)
+        _send_chunks(chat_id, final, send_fn=client_send_message)
 
     _show_in_session_buttons(chat_id, sess)
 
@@ -687,11 +687,11 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
 def _handle_more_details(chat_id: int, sess: _Session) -> None:
     """Ask Claude to elaborate on the last answer without taking a new screenshot."""
     if not sess.last_answer:
-        send_message(chat_id, "No previous answer to elaborate on — tap I'm Ready first.", parse_mode=None)
+        client_send_message(chat_id, "No previous answer to elaborate on — tap I'm Ready first.", parse_mode=None)
         _show_in_session_buttons(chat_id, sess)
         return
 
-    resp = send_message(chat_id, "Let me expand on that...", parse_mode=None)
+    resp = client_send_message(chat_id, "Let me expand on that...", parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
         msg_id = resp["result"]["message_id"]
@@ -700,7 +700,7 @@ def _handle_more_details(chat_id: int, sess: _Session) -> None:
         if msg_id:
             preview = acc[-_TG_MAX:] if len(acc) > _TG_MAX else acc
             try:
-                edit_message(chat_id, msg_id, preview, parse_mode=None)
+                client_edit_message(chat_id, msg_id, preview, parse_mode=None)
             except Exception:
                 pass
 
