@@ -783,7 +783,7 @@ def _show_client_prompt(chat_id: int, sess: _Session) -> None:
     elif sess.stage == _Stage.SELECTING_BROWSER:
         _show_browser_picker(chat_id, sess)
     elif sess.stage == _Stage.AWAITING_ADMIN_READY:
-        send_message(
+        client_send_message(
             chat_id,
             "Your session is still being set up — hang tight, you'll be notified when it's ready.",
             parse_mode=None,
