@@ -927,15 +927,20 @@ def _ask_claude_plain(prompt: str, screen: bool = False) -> str:
         err = (result.stderr or "").strip()
         log.warning("Claude empty stdout (exit %d); stderr: %.300s", result.returncode, err)
         return "I didn't get a response — please tap the button to try again."
-    if result.returncode != 0:
+    if result.returncode != 0 or _is_cli_error_text(raw):
         err = (result.stderr or "").strip()
-        return f"Error (exit {result.returncode}):\n{err[:600]}" if err else \
-               f"Claude exited with code {result.returncode}."
+        log.error("Claude CLI auth/billing failure (exit %d); stdout: %.300s; stderr: %.300s",
+                   result.returncode, raw[:300], err[:300])
+        return "I didn't get a response — please tap the button to try again."
     try:
         data = json.loads(raw)
-        return (data.get("result") or data.get("text") or raw).strip()
+        answer = (data.get("result") or data.get("text") or raw).strip()
     except json.JSONDecodeError:
-        return raw.strip()
+        answer = raw.strip()
+    if _is_cli_error_text(answer):
+        log.error("Claude CLI auth/billing failure leaked into result text: %.300s", answer[:300])
+        return "I didn't get a response — please tap the button to try again."
+    return answer
 
 
 def _ask_claude_stream(prompt: str, on_update: "Callable[[str], None]",
