@@ -826,7 +826,7 @@ def _needs_screen(text: str) -> bool:
 def _subprocess_env() -> dict:
     """Force claude CLI into subscription (OAuth) mode, no CLAUDE.md."""
     env = os.environ.copy()
-    env["ANTHROPIC_API_KEY"] = ""       # force OAuth/subscription mode
+    env.pop("ANTHROPIC_API_KEY", None)  # force subscription mode, never API credits
     env["CLAUDE_CODE_SIMPLE"] = "1"     # disable CLAUDE.md auto-discovery
     return env
 

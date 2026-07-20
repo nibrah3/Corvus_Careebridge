@@ -56,12 +56,12 @@ CLAUDE_CWD   = r"C:\tmp"
 def _claude_env() -> dict:
     """Environment for Claude subprocesses.
 
-    Blank ANTHROPIC_API_KEY forces subscription/OAuth auth so guidance calls are
+    Removing ANTHROPIC_API_KEY forces subscription/OAuth auth so guidance calls are
     NOT billed against an API key (project auth standard). CLAUDE_CODE_SIMPLE trims
     noisy startup output. Mirrors telegram_claude_bridge.py.
     """
     env = os.environ.copy()
-    env["ANTHROPIC_API_KEY"] = ""
+    env.pop("ANTHROPIC_API_KEY", None)
     env["CLAUDE_CODE_SIMPLE"] = "1"
     return env
 
