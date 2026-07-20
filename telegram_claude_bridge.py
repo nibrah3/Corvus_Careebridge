@@ -1734,7 +1734,7 @@ def main() -> None:
             except _queue.Empty:
                 pass
             except Exception:
-                pass
+                log.exception("DIAG client-bus consumer loop error")
 
     log.info("Listening for Telegram messages (admin + client buses)...")
     threading.Thread(target=_consume_client_bus, daemon=True, name="client-bus-consumer").start()

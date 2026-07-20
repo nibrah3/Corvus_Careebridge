@@ -153,6 +153,7 @@ class _UpdateBus:
                     self._offset = upd["update_id"] + 1
                     self._dispatch(upd)
             except Exception:
+                log.exception("DIAG session bus poll/dispatch failed")
                 time.sleep(5)
 
     def _dispatch(self, upd: dict) -> None:
@@ -163,6 +164,10 @@ class _UpdateBus:
             mid = cq.get("message", {}).get("message_id")
             with self._lock:
                 q = self._cb_waiters.get(mid)
+            log.info(
+                "DIAG session dispatch callback_query mid=%s has_waiter=%s chat=%s data=%r",
+                mid, bool(q), cq.get("from", {}).get("id"), cq.get("data"),
+            )
             if q:
                 q.put(cq)
             else:
