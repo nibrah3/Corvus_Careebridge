@@ -313,12 +313,13 @@ def _chunk(text: str, size: int = _TG_MAX) -> list[str]:
     return chunks
 
 
-def _send_chunks(chat_id: int, text: str) -> None:
+def _send_chunks(chat_id: int, text: str, send_fn=None) -> None:
     """Send text as one or more plain Telegram messages (no HTML parse_mode)."""
+    send_fn = send_fn or send_message
     chunks = _chunk(text)
     for i, chunk in enumerate(chunks):
         prefix = f"[{i+1}/{len(chunks)}]\n" if len(chunks) > 1 else ""
-        send_message(chat_id, prefix + chunk, parse_mode=None)
+        send_fn(chat_id, prefix + chunk, parse_mode=None)
 
 
 # ── Assessment session helpers ────────────────────────────────────────────────
