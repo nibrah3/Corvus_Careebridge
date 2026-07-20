@@ -441,7 +441,7 @@ def _handle_connect(admin_chat_id: int, client_id: int, uv_id: str) -> None:
 
 def _handle_test_screen(chat_id: int, sess: _Session) -> None:
     """Screenshot + plain description — lets client verify Corvus can see the screen."""
-    resp = send_message(chat_id, "Let me take a look at your screen...", parse_mode=None)
+    resp = client_send_message(chat_id, "Let me take a look at your screen...", parse_mode=None)
     msg_id: int | None = None
     if resp.get("ok"):
         msg_id = resp["result"]["message_id"]
@@ -450,7 +450,7 @@ def _handle_test_screen(chat_id: int, sess: _Session) -> None:
         if msg_id:
             preview = acc[-_TG_MAX:] if len(acc) > _TG_MAX else acc
             try:
-                edit_message(chat_id, msg_id, preview, parse_mode=None)
+                client_edit_message(chat_id, msg_id, preview, parse_mode=None)
             except Exception:
                 pass
 
@@ -469,7 +469,7 @@ def _handle_test_screen(chat_id: int, sess: _Session) -> None:
         except subprocess.TimeoutExpired:
             if msg_id:
                 try:
-                    edit_message(chat_id, msg_id, "Timed out — try again.", parse_mode=None)
+                    client_edit_message(chat_id, msg_id, "Timed out — try again.", parse_mode=None)
                 except Exception:
                     pass
             _show_welcome(chat_id, sess)
@@ -478,7 +478,7 @@ def _handle_test_screen(chat_id: int, sess: _Session) -> None:
             log.exception("Screen test failed")
             if msg_id:
                 try:
-                    edit_message(chat_id, msg_id, f"Screen test failed: {exc}", parse_mode=None)
+                    client_edit_message(chat_id, msg_id, f"Screen test failed: {exc}", parse_mode=None)
                 except Exception:
                     pass
             _show_welcome(chat_id, sess)
@@ -486,11 +486,11 @@ def _handle_test_screen(chat_id: int, sess: _Session) -> None:
 
     if msg_id and len(final) <= _TG_MAX:
         try:
-            edit_message(chat_id, msg_id, final, parse_mode=None)
+            client_edit_message(chat_id, msg_id, final, parse_mode=None)
         except Exception:
-            _send_chunks(chat_id, final)
+            _send_chunks(chat_id, final, send_fn=client_send_message)
     else:
-        _send_chunks(chat_id, final)
+        _send_chunks(chat_id, final, send_fn=client_send_message)
 
     _show_welcome(chat_id, sess)
 
