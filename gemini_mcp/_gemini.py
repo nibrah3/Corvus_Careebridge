@@ -102,9 +102,14 @@ def upload_video(video_path: str) -> dict:
         return {"error": str(exc)}
 
 
-def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash") -> dict:
+def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash",
+                   mime_type: str = "video/mp4") -> dict:
     """
-    Send a previously uploaded video to Gemini with a prompt.
+    Send a previously uploaded video (or audio) file to Gemini with a prompt.
+
+    mime_type must match what the file was uploaded as (upload_video() doesn't
+    fix the MIME type — it's whatever the caller uploaded). Defaults to
+    "video/mp4"; pass e.g. "audio/mp4"/"audio/mpeg"/"audio/wav" for audio files.
 
     Returns {text, model, elapsed_ms} or {error: str}.
     """
@@ -114,7 +119,7 @@ def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash") -
         t0     = time.monotonic()
         resp   = client.models.generate_content(
             model=model,
-            contents=[types.Part.from_uri(file_uri=file_uri, mime_type="video/mp4"), prompt],
+            contents=[types.Part.from_uri(file_uri=file_uri, mime_type=mime_type), prompt],
         )
         return {
             "text":       resp.text,
