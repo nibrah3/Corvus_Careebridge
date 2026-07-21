@@ -597,10 +597,33 @@ def _handle_answer_question(chat_id: int, sess: _Session, no_attachment: bool = 
             "on-screen content only; do not wait for or expect a downloaded file."
         )
     if sess.files:
-        ctx_lines.append(
-            "Assessment files collected this session (guidelines + any question files): "
-            + ", ".join(Path(f).name for f in sess.files)
-        )
+        _AV_MIME = {
+            ".mp4": "video/mp4", ".mov": "video/quicktime", ".avi": "video/x-msvideo",
+            ".webm": "video/webm", ".mkv": "video/x-matroska",
+            ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
+            ".aac": "audio/aac", ".ogg": "audio/ogg", ".flac": "audio/flac",
+        }
+        av_files = [f for f in sess.files if Path(f).suffix.lower() in _AV_MIME]
+        doc_files = [f for f in sess.files if f not in av_files]
+        if doc_files:
+            ctx_lines.append(
+                "Assessment files collected this session (guidelines + any question files), "
+                "given as full local paths — read them directly:\n"
+                + "\n".join(f"  - {f}" for f in doc_files)
+            )
+        if av_files:
+            av_desc = "\n".join(
+                f"  - {f}  (mime_type: \"{_AV_MIME[Path(f).suffix.lower()]}\")" for f in av_files
+            )
+            ctx_lines.append(
+                "Video/audio file(s) collected this session, given as full local paths:\n"
+                + av_desc + "\n"
+                "For each one: call mcp__gemini__upload_video(video_path=<path>) to get a "
+                "file_uri, then call mcp__gemini__analyse_video(file_uri=<uri>, "
+                "mime_type=<the mime_type listed above for that file>, prompt=...) asking it "
+                "to describe/transcribe the content relevant to the question. Fold the result "
+                "into your context alongside the screenshots."
+            )
     ctx_lines.append(
         "The client is currently scrolling through the assessment page. "
         "Capture the full page content by taking 7 screenshots spaced 2 seconds apart:\n"
@@ -805,7 +828,8 @@ def _show_client_prompt(chat_id: int, sess: _Session) -> None:
 
 # ── Claude invocation ─────────────────────────────────────────────────────────
 
-_CLAUDE_TOOLS_SCREEN = "Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,mcp__gemini__analyse_image"
+_CLAUDE_TOOLS_SCREEN = ("Read,Edit,Bash,Glob,Grep,Write,mcp__capture__screenshot,"
+                        "mcp__gemini__analyse_image,mcp__gemini__upload_video,mcp__gemini__analyse_video")
 _CLAUDE_BIN = r"C:\Users\Mike\AppData\Roaming\npm\claude.cmd"
 _MCP_CONFIG = str(ROOT / "bridge_mcp.json")
 # screen=False calls use --allowedTools none (no tools at all), but without an

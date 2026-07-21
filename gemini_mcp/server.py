@@ -112,24 +112,32 @@ def upload_video(video_path: str) -> dict:
 
 
 @mcp.tool()
-def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash") -> dict:
+def analyse_video(file_uri: str, prompt: str, model: str = "gemini-2.5-flash",
+                   mime_type: str = "video/mp4") -> dict:
     """
-    Ask Gemini 2.0 Flash to analyse an uploaded video.
+    Ask Gemini 2.0 Flash to analyse an uploaded video OR audio file.
+
+    Works for audio too — upload_video() is format-agnostic (just uploads
+    whatever file you point it at), so for an audio question upload the
+    audio file with upload_video() and then call this with the matching
+    mime_type (e.g. "audio/mp4", "audio/mpeg", "audio/wav").
 
     Args:
-        file_uri: URI from upload_video() — e.g. "https://generativelanguage.googleapis.com/v1beta/files/xxx"
-        prompt:   What to ask about the video.
-                  Example: "This is a screen recording of an assessment video.
-                  Describe exactly what is happening, what objects appear, and
-                  any text visible. Be specific about timestamps."
-        model:    Gemini model ID. Default: "gemini-2.0-flash"
+        file_uri:  URI from upload_video() — e.g. "https://generativelanguage.googleapis.com/v1beta/files/xxx"
+        prompt:    What to ask about the video/audio.
+                   Example: "This is a screen recording of an assessment video.
+                   Describe exactly what is happening, what objects appear, and
+                   any text visible. Be specific about timestamps."
+        model:     Gemini model ID. Default: "gemini-2.0-flash"
+        mime_type: MIME type matching the uploaded file. Default: "video/mp4".
+                   Use an "audio/*" type for audio-only files.
 
     Returns:
         {text: str, model: str, elapsed_ms: int}
     """
     try:
         from gemini_mcp._gemini import analyse_video as _analyse
-        return _analyse(file_uri=file_uri, prompt=prompt, model=model)
+        return _analyse(file_uri=file_uri, prompt=prompt, model=model, mime_type=mime_type)
     except Exception as exc:
         return {"error": str(exc)}
 
